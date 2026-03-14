@@ -1,0 +1,222 @@
+<?xml version="1.0" standalone='yes'?>
+<PLUGIN name="power.optimizer" author="Archmonger" version="2026.03.13" icon="bolt" min="6.12.0" launch="Settings/power.optimizer" pluginURL="https://raw.githubusercontent.com/Archmonger/Unraid-Power-Optimizer/main/power.optimizer.plg">
+<CHANGES>
+### 2026.03.13
+- Initial Release
+
+</CHANGES>
+
+<FILE Name="/boot/config/plugins/power.optimizer/power.optimizer-2026.03.13.tgz">
+<URL>https://raw.githubusercontent.com/Archmonger/Unraid-Power-Optimizer/main/dist/power.optimizer-2026.03.13.tgz</URL>
+<SHA256>9e8de551b525e33dacf8ce9e39aac2c365fe847420cf6ec21c88d8663d23ea8f</SHA256>
+</FILE>
+
+<FILE Run="/bin/bash"><INLINE><![CDATA[
+#!/bin/bash
+set -e
+
+PLUGIN_NAME="power.optimizer"
+PLUGIN_VERSION="2026.03.13"
+PLUGIN_DIR="/usr/local/emhttp/plugins/${PLUGIN_NAME}"
+CONFIG_DIR="/boot/config/plugins/${PLUGIN_NAME}"
+CONFIG_FILE="${CONFIG_DIR}/settings.cfg"
+ARCHIVE_FILE="${CONFIG_DIR}/${PLUGIN_NAME}-${PLUGIN_VERSION}.tgz"
+INSTALL_LOG_FILE="/boot/logs/${PLUGIN_NAME}-install.log"
+PLUGIN_MGR_PRE_HOOK_DIR="/usr/local/emhttp/plugins/dynamix.plugin.manager/pre-hooks"
+PLUGIN_MGR_POST_HOOK_DIR="/usr/local/emhttp/plugins/dynamix.plugin.manager/post-hooks"
+PLUGIN_PRE_HOOK_FILE="${PLUGIN_MGR_PRE_HOOK_DIR}/90-power.optimizer"
+PLUGIN_POST_HOOK_FILE="${PLUGIN_MGR_POST_HOOK_DIR}/90-power.optimizer"
+
+mkdir -p /boot/logs
+exec >>"$INSTALL_LOG_FILE" 2>&1
+echo "==== $(date '+%F %T') plugin install start (${PLUGIN_NAME} ${PLUGIN_VERSION}) ===="
+trap 'rc=$?; echo "ERROR: install failed at line ${LINENO} (exit=${rc})"; exit "$rc"' ERR
+
+mkdir -p "$CONFIG_DIR"
+if mkdir -p "$PLUGIN_MGR_PRE_HOOK_DIR" "$PLUGIN_MGR_POST_HOOK_DIR" 2>/dev/null; then
+  # Plugin-manager pre-hook: run before install/update and clear stale plugin artifacts.
+  cat > "$PLUGIN_PRE_HOOK_FILE" <<'PREHOOK' || true
+#!/bin/bash
+TYPE="$1"
+METHOD="$2"
+PLUGIN_FILE="$3"
+
+[[ "$TYPE" == "plugin" ]] || exit 0
+[[ "$METHOD" == "install" || "$METHOD" == "update" ]] || exit 0
+case "$PLUGIN_FILE" in
+  power.optimizer*.plg) ;;
+  *) exit 0 ;;
+esac
+
+PLUGIN_NAME="power.optimizer"
+PLUGIN_DIR="/usr/local/emhttp/plugins/${PLUGIN_NAME}"
+CONFIG_DIR="/boot/config/plugins/${PLUGIN_NAME}"
+
+# Force a fresh archive fetch and clear stale plugin payload remnants.
+find "$CONFIG_DIR" -maxdepth 1 -type f -name "${PLUGIN_NAME}-*.tgz" -delete 2>/dev/null || true
+rm -rf "$PLUGIN_DIR"
+PREHOOK
+
+  # Plugin-manager post-hook: run after remove and purge stale leftovers.
+  cat > "$PLUGIN_POST_HOOK_FILE" <<'POSTHOOK' || true
+#!/bin/bash
+TYPE="$1"
+METHOD="$2"
+PLUGIN_FILE="$3"
+
+[[ "$TYPE" == "plugin" ]] || exit 0
+[[ "$METHOD" == "remove" ]] || exit 0
+case "$PLUGIN_FILE" in
+  power.optimizer*.plg) ;;
+  *) exit 0 ;;
+esac
+
+PLUGIN_NAME="power.optimizer"
+PLUGIN_DIR="/usr/local/emhttp/plugins/${PLUGIN_NAME}"
+CONFIG_DIR="/boot/config/plugins/${PLUGIN_NAME}"
+PRE_HOOK_FILE="/usr/local/emhttp/plugins/dynamix.plugin.manager/pre-hooks/90-power.optimizer"
+POST_HOOK_FILE="/usr/local/emhttp/plugins/dynamix.plugin.manager/post-hooks/90-power.optimizer"
+
+rm -rf "$PLUGIN_DIR"
+find "$CONFIG_DIR" -maxdepth 1 -type f -name "${PLUGIN_NAME}-*.tgz" -delete 2>/dev/null || true
+rm -f "$PRE_HOOK_FILE" "$POST_HOOK_FILE"
+POSTHOOK
+
+  chmod 755 "$PLUGIN_PRE_HOOK_FILE" "$PLUGIN_POST_HOOK_FILE" 2>/dev/null || true
+else
+  echo "Warning: unable to access plugin-manager hook directories; continuing without custom hooks."
+fi
+
+# Keep only the currently referenced archive version.
+find "$CONFIG_DIR" -maxdepth 1 -type f -name "${PLUGIN_NAME}-*.tgz" ! -name "${PLUGIN_NAME}-${PLUGIN_VERSION}.tgz" -delete 2>/dev/null || true
+
+rm -rf "$PLUGIN_DIR"
+mkdir -p "$PLUGIN_DIR/include" "$PLUGIN_DIR/event" "$PLUGIN_DIR/scripts"
+
+if [[ ! -f "$ARCHIVE_FILE" ]]; then
+  echo "Missing plugin archive: $ARCHIVE_FILE"
+  exit 1
+fi
+
+tar -C "$PLUGIN_DIR" -xzf "$ARCHIVE_FILE"
+
+echo "Archive extracted into $PLUGIN_DIR"
+
+required_files=(
+  "$PLUGIN_DIR/power.optimizer.page"
+  "$PLUGIN_DIR/Home.page"
+  "$PLUGIN_DIR/Disks.page"
+  "$PLUGIN_DIR/include/actions.php"
+  "$PLUGIN_DIR/scripts/disks_power.sh"
+)
+for required_file in "${required_files[@]}"; do
+  if [[ ! -f "$required_file" ]]; then
+    echo "Missing expected file after extraction: $required_file"
+    exit 1
+  fi
+done
+
+echo "Verified required extracted files."
+find "$PLUGIN_DIR" -maxdepth 2 -type f | sed "s#^$PLUGIN_DIR/##" | sort
+
+chmod 755 \
+  "$PLUGIN_DIR/event/disks_mounted" \
+  "$PLUGIN_DIR/scripts/pcie_power.sh" \
+  "$PLUGIN_DIR/scripts/cpu_power.sh" \
+  "$PLUGIN_DIR/scripts/ethernet_power.sh" \
+  "$PLUGIN_DIR/scripts/disks_power.sh" \
+  "$PLUGIN_DIR/scripts/usb_power.sh" \
+  "$PLUGIN_DIR/scripts/i2c_power.sh" \
+  "$PLUGIN_DIR/scripts/system_tunables_power.sh"
+
+if [[ ! -f "$CONFIG_FILE" ]]; then
+  {
+    echo 'BLACK_LIST="Example1,Example2"'
+    echo 'AUTO_EXECUTE_ON_STARTUP="0"'
+    echo 'OPERATION_MODE="automatic"'
+    echo 'MAX_ASPM_LEVEL="3"'
+    echo 'ENABLE_ASPM_OPTIMIZATION="1"'
+    echo 'ENABLE_CLKPM_OPTIMIZATION="1"'
+    echo 'ENABLE_LTR_OPTIMIZATION="1"'
+    echo 'ENABLE_L1SS_OPTIMIZATION="0"'
+    echo 'ENABLE_PCI_RUNTIME_PM_OPTIMIZATION="1"'
+    echo 'FORCE_ASPM_MODE="0"'
+    echo 'FORCE_ASPM="0"'
+    echo 'MANUAL_FORCE_ASPM="0"'
+    echo 'MANUAL_TARGET_ASPM_MODE="3"'
+    echo 'MANUAL_INCLUDE_ENDPOINTS="1"'
+    echo 'MANUAL_INCLUDE_BRIDGES="1"'
+    echo 'MANUAL_SELECTED_DEVICES=""'
+
+    echo 'CPU_MODE="automatic"'
+    echo 'CPU_AUTO_EXECUTE_ON_STARTUP="0"'
+    echo 'ENABLE_CPU_GOVERNOR_OPTIMIZATION="1"'
+    echo 'CPU_GOVERNOR_TARGET="powersave"'
+    echo 'CPU_GOVERNOR_MODE="powersave"'
+    echo 'ENABLE_CPU_TURBO_OPTIMIZATION="0"'
+    echo 'CPU_TURBO_TARGET="0"'
+    echo 'CPU_TURBO_MODE="disabled"'
+
+    echo 'ETHERNET_MODE="automatic"'
+    echo 'ETHERNET_AUTO_EXECUTE_ON_STARTUP="0"'
+    echo 'ENABLE_ETHERNET_EEE_OPTIMIZATION="1"'
+    echo 'ETHERNET_EEE_TARGET="on"'
+    echo 'ENABLE_ETHERNET_WOL_OPTIMIZATION="1"'
+    echo 'ETHERNET_WOL_TARGET="d"'
+    echo 'ETHERNET_MANUAL_INTERFACES=""'
+
+    echo 'DISKS_MODE="automatic"'
+    echo 'DISKS_AUTO_EXECUTE_ON_STARTUP="0"'
+    echo 'SATA_LPM_MODE="min_power"'
+    echo 'ENABLE_SATA_LPM_OPTIMIZATION="1"'
+    echo 'SATA_LPM_POLICY="min_power"'
+    echo 'ENABLE_DISK_RUNTIME_PM_OPTIMIZATION="1"'
+    echo 'DISK_RUNTIME_PM_TARGET="auto"'
+    echo 'DISK_RUNTIME_PM_MODE="auto"'
+    echo 'ENABLE_ATA_RUNTIME_PM_OPTIMIZATION="1"'
+    echo 'ATA_RUNTIME_PM_TARGET="auto"'
+    echo 'ATA_RUNTIME_PM_MODE="auto"'
+
+    echo 'USB_MODE="automatic"'
+    echo 'USB_AUTO_EXECUTE_ON_STARTUP="0"'
+    echo 'ENABLE_USB_AUTOSUSPEND_OPTIMIZATION="1"'
+    echo 'USB_RUNTIME_PM_TARGET="auto"'
+    echo 'ENABLE_USB_WAKEUP_OPTIMIZATION="1"'
+    echo 'USB_WAKEUP_TARGET="disabled"'
+    echo 'USB_DEVICE_GLOB="*"'
+
+    echo 'I2C_MODE="automatic"'
+    echo 'I2C_AUTO_EXECUTE_ON_STARTUP="0"'
+    echo 'ENABLE_I2C_RUNTIME_PM_OPTIMIZATION="1"'
+    echo 'I2C_RUNTIME_PM_TARGET="on"'
+    echo 'I2C_RUNTIME_PM_MODE="on"'
+    echo 'I2C_DEVICE_GLOB="i2c-*"'
+
+    echo 'SYSTEM_AUTO_EXECUTE_ON_STARTUP="0"'
+    echo 'ENABLE_AUDIO_CODEC_PM_OPTIMIZATION="1"'
+    echo 'AUDIO_CODEC_POWER_SAVE_SECONDS="1"'
+    echo 'ENABLE_NMI_WATCHDOG_OPTIMIZATION="1"'
+    echo 'NMI_WATCHDOG_TARGET="0"'
+    echo 'ENABLE_VM_WRITEBACK_TIMEOUT_OPTIMIZATION="1"'
+    echo 'VM_DIRTY_WRITEBACK_CENTISECS="1500"'
+    echo 'VM_WRITEBACK_TIMEOUT_CENTISECS="1500"'
+    echo 'POWER_AWARE_CPU_SCHEDULER_MODE="2"'
+    echo 'ENABLE_POWER_AWARE_CPU_SCHEDULER_OPTIMIZATION="1"'
+    echo 'POWER_AWARE_CPU_SCHEDULER_TARGET="2"'
+  } > "$CONFIG_FILE"
+fi
+]]></INLINE></FILE>
+
+<FILE Run="/bin/bash" Method="remove"><INLINE><![CDATA[
+#!/bin/bash
+
+PLUGIN_NAME="power.optimizer"
+PLUGIN_DIR="/usr/local/emhttp/plugins/${PLUGIN_NAME}"
+PRE_HOOK_FILE="/usr/local/emhttp/plugins/dynamix.plugin.manager/pre-hooks/90-power.optimizer"
+POST_HOOK_FILE="/usr/local/emhttp/plugins/dynamix.plugin.manager/post-hooks/90-power.optimizer"
+
+rm -rf "$PLUGIN_DIR"
+rm -f "$PRE_HOOK_FILE" "$POST_HOOK_FILE"
+# Keep /boot/config/plugins/power.optimizer/settings.cfg for persistence.
+]]></INLINE></FILE>
+</PLUGIN>

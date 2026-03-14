@@ -1,0 +1,72 @@
+Menu="power.optimizer:10"
+Title="Home"
+---
+<div class="home-wrap">
+    <h2>Unraid Power Optimizer</h2>
+
+    <p>
+        The overall goal of this plugin is to reduce system power consumption while preserving expected day-to-day behavior.
+        Sane defaults are provided for each section, and optimizations are applied with a best-effort approach to avoid system instability.
+        However, this plug-in cannot gaurantee perfect operation since hardware and firmware behavior vary between systems.
+    </p>
+
+    <div markdown="1" class="notice warning">
+    Backups are strongly recommended as a precaution before enabling aggressive power tuning.
+    </div>
+
+    <div class="home-grid">
+        <div class="home-card">
+            <h3>PCI Express</h3>
+            <p>ASPM, CLKPM, LTR, L1SS, and runtime PM controls with manual device targeting.</p>
+        </div>
+        <div class="home-card">
+            <h3>CPU</h3>
+            <p>CPU governor and turbo behavior tuning.</p>
+        </div>
+        <div class="home-card">
+            <h3>Ethernet</h3>
+            <p>EEE and Wake on LAN controls with optional manual interface selection.</p>
+        </div>
+        <div class="home-card">
+            <h3>Disks and USB</h3>
+            <p>SATA link power management and autosuspend/runtime PM settings.</p>
+        </div>
+        <div class="home-card">
+            <h3>I2C</h3>
+            <p>Dedicated I2C runtime PM controls with manual target and device glob support.</p>
+        </div>
+        <div class="home-card">
+            <h3>System Tunables</h3>
+            <p>System-level tunables for audio codec PM, scheduler, and watchdog controls.</p>
+        </div>
+    </div>
+</div>
+
+<style>
+.home-wrap {
+    max-width: 1100px;
+}
+
+.home-grid {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+}
+
+.home-card {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 10px;
+    background: #f8fafc;
+    color: #111827;
+}
+
+.home-card h3 {
+    margin: 0 0 8px;
+}
+
+.home-card p {
+    margin: 0;
+}
+</style>

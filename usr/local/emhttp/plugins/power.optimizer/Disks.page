@@ -1,0 +1,360 @@
+Menu="power.optimizer:50"
+Title="Disks"
+---
+<div class="power-section">
+    <h2>Disk Power Management</h2>
+
+    <p>
+        Configure disk and controller runtime power settings with power-saving defaults.
+    </p>
+
+    <div class="grid">
+        <label class="toggle">
+            <input type="checkbox" id="disks-auto-startup-toggle">
+            Auto Execute on Startup
+        </label>
+
+        <label>
+            SATA Link Power Management policy<br>
+            <select id="sata-lpm-mode">
+                <option value="disabled">disabled</option>
+                <option value="min_power">min_power</option>
+                <option value="med_power_with_dipm">med_power_with_dipm</option>
+                <option value="max_performance">max_performance</option>
+            </select>
+        </label>
+
+        <label>
+            Disk Power Management<br>
+            <select id="disk-runtime-pm-mode"></select>
+        </label>
+
+        <label>
+            ATA Power Management<br>
+            <select id="ata-runtime-pm-mode"></select>
+        </label>
+    </div>
+
+    <div class="row">
+        <button type="button" class="btn" id="disks-save-button">Save Settings</button>
+        <button type="button" class="btn" id="disks-run-button">Run Now</button>
+    </div>
+
+    <div id="disks-status-message" class="status-message" aria-live="polite">[--:--:--] Ready.</div>
+    <pre id="disks-status" class="terminal-box">$ waiting for optimizer output...</pre>
+</div>
+
+<style>
+.power-section { max-width: 980px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin: 10px 0; }
+.toggle { display: inline-flex; align-items: center; gap: 8px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.status-message {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    border: 1px solid #d1d5db;
+    background: #f3f4f6;
+    color: #1f2937;
+    white-space: pre-wrap;
+}
+.status-message.error {
+    border-color: #b91c1c;
+    background: #fee2e2;
+    color: #7f1d1d;
+}
+.terminal-box {
+    margin-top: 10px;
+    background: #0b1220;
+    color: #d4f7d0;
+    padding: 12px;
+    border-radius: 4px;
+    border: 1px solid #243145;
+    white-space: pre-wrap;
+    font-family: Consolas, "Courier New", monospace;
+    min-height: 220px;
+    max-height: 420px;
+    overflow: auto;
+}
+</style>
+
+<script>
+(function () {
+    const endpoint = '/plugins/power.optimizer/include/actions.php';
+    const executionLogScope = 'disks';
+    const executionLogLines = 220;
+    const executionLogPollMs = 1000;
+
+    const autoStartupToggle = document.getElementById('disks-auto-startup-toggle');
+    const sataLpmMode = document.getElementById('sata-lpm-mode');
+    const diskRuntimePmMode = document.getElementById('disk-runtime-pm-mode');
+    const ataRuntimePmMode = document.getElementById('ata-runtime-pm-mode');
+    const saveButton = document.getElementById('disks-save-button');
+    const runButton = document.getElementById('disks-run-button');
+    const statusMessage = document.getElementById('disks-status-message');
+    const status = document.getElementById('disks-status');
+
+    const state = {
+        executionLogPath: '/boot/logs/power.optimizer-disks.log',
+        executionLogTail: '',
+        savedSettingsSignature: '',
+        diskRuntimePmTargets: ['auto'],
+        ataRuntimePmTargets: ['auto']
+    };
+
+    let executionLogTimer = null;
+
+    function nowTimestamp() {
+        return new Date().toLocaleTimeString('en-US', { hour12: false });
+    }
+
+    function renderTerminal() {
+        const lines = [];
+        lines.push('$ tail -n ' + executionLogLines + ' ' + state.executionLogPath);
+        lines.push(state.executionLogTail || '(no command output yet)');
+        status.textContent = lines.join('\n');
+        status.scrollTop = status.scrollHeight;
+    }
+
+    function setStatus(text, isError) {
+        if (!statusMessage) {
+            return;
+        }
+
+        statusMessage.textContent = '[' + nowTimestamp() + '] ' + text;
+        statusMessage.className = 'status-message' + (isError ? ' error' : '');
+    }
+
+    async function postAction(action, payload) {
+        const body = new URLSearchParams();
+        body.set('action', action);
+        const csrfTokenField = document.querySelector('input[name="csrf_token"]');
+        const csrfTokenMeta = document.querySelector('meta[name="csrf_token"]');
+        const csrfToken = (csrfTokenField && csrfTokenField.value)
+            || (csrfTokenMeta && csrfTokenMeta.content)
+            || window.csrf_token
+            || '';
+        if (csrfToken) {
+            body.set('csrf_token', csrfToken);
+        }
+        Object.keys(payload || {}).forEach((key) => body.set(key, payload[key]));
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+            body: body.toString()
+        });
+
+        const responseText = await response.text();
+        if (!responseText.trim()) {
+            throw new Error('Empty response from plugin backend.');
+        }
+
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (error) {
+            throw new Error('Invalid response from plugin backend.');
+        }
+
+        return data;
+    }
+
+    async function loadExecutionLogOutput() {
+        const data = await postAction('get_execution_log_output', {
+            scope: executionLogScope,
+            lines: String(executionLogLines)
+        });
+
+        if (!data.ok) {
+            throw new Error(data.message || 'Failed to load execution log output.');
+        }
+
+        if (data.log) {
+            state.executionLogPath = data.log;
+        }
+
+        state.executionLogTail = data.output || '';
+        renderTerminal();
+    }
+
+    function startExecutionLogPolling() {
+        if (executionLogTimer !== null) {
+            return;
+        }
+
+        executionLogTimer = window.setInterval(function () {
+            loadExecutionLogOutput().catch(function (error) {
+                setStatus('Log refresh failed: ' + error.message, true);
+            });
+        }, executionLogPollMs);
+    }
+
+    function collectSettingsPayload() {
+        return {
+            auto_execute_on_startup: autoStartupToggle.checked ? '1' : '0',
+            sata_lpm_mode: sataLpmMode.value,
+            disk_runtime_pm_mode: diskRuntimePmMode.value,
+            ata_runtime_pm_mode: ataRuntimePmMode.value,
+        };
+    }
+
+    function normalizeRuntimeTargets(values) {
+        const allowed = ['auto'];
+        const seen = Object.create(null);
+        const result = [];
+
+        (values || []).forEach(function (value) {
+            const normalized = String(value || '').toLowerCase();
+            if (allowed.indexOf(normalized) === -1 || seen[normalized]) {
+                return;
+            }
+            seen[normalized] = true;
+            result.push(normalized);
+        });
+
+        if (result.length === 0) {
+            return ['auto'];
+        }
+
+        return result;
+    }
+
+    function populateRuntimePmSelect(selectElement, targets, selectedMode) {
+        const options = [{ value: 'disabled', label: 'disabled' }]
+            .concat(targets.map(function (target) {
+                return { value: target, label: target };
+            }));
+
+        selectElement.innerHTML = '';
+        options.forEach(function (optionData) {
+            const option = document.createElement('option');
+            option.value = optionData.value;
+            option.textContent = optionData.label;
+            selectElement.appendChild(option);
+        });
+
+        const fallback = options.some(function (item) {
+            return item.value === 'auto';
+        }) ? 'auto' : options[0].value;
+
+        const nextMode = options.some(function (item) {
+            return item.value === selectedMode;
+        }) ? selectedMode : fallback;
+        selectElement.value = nextMode;
+    }
+
+    function settingsSignature(payload) {
+        return JSON.stringify(payload);
+    }
+
+    function updateSaveButtonState() {
+        if (state.savedSettingsSignature === '') {
+            saveButton.disabled = true;
+            return;
+        }
+
+        saveButton.disabled = settingsSignature(collectSettingsPayload()) === state.savedSettingsSignature;
+    }
+
+    function markSettingsSaved() {
+        state.savedSettingsSignature = settingsSignature(collectSettingsPayload());
+        updateSaveButtonState();
+    }
+
+    function registerDirtyTracking() {
+        [autoStartupToggle, sataLpmMode, diskRuntimePmMode, ataRuntimePmMode].forEach(function (element) {
+            element.addEventListener('change', updateSaveButtonState);
+            element.addEventListener('input', updateSaveButtonState);
+        });
+    }
+
+    function applySettings(settings, capabilities) {
+        const caps = capabilities || {};
+        state.diskRuntimePmTargets = normalizeRuntimeTargets(caps.disk_runtime_pm_targets);
+        state.ataRuntimePmTargets = normalizeRuntimeTargets(caps.ata_runtime_pm_targets);
+
+        autoStartupToggle.checked = Number(settings.auto_execute_on_startup || 0) === 1;
+        const legacySataMode = Number(settings.enable_sata_lpm_optimization || 0) === 1
+            ? (settings.sata_lpm_policy || 'min_power')
+            : 'disabled';
+        sataLpmMode.value = settings.sata_lpm_mode || legacySataMode;
+
+        populateRuntimePmSelect(
+            diskRuntimePmMode,
+            state.diskRuntimePmTargets,
+            settings.disk_runtime_pm_mode || 'auto'
+        );
+        populateRuntimePmSelect(
+            ataRuntimePmMode,
+            state.ataRuntimePmTargets,
+            settings.ata_runtime_pm_mode || 'auto'
+        );
+
+        markSettingsSaved();
+    }
+
+    async function loadSettings() {
+        const data = await postAction('get_disks_settings', {});
+        if (!data.ok) {
+            throw new Error(data.message || 'Failed to load Disk settings.');
+        }
+        applySettings(data.settings || {}, data.capabilities || {});
+    }
+
+    async function saveSettings(silent) {
+        if (!silent) {
+            setStatus('Saving Disk settings...', false);
+        }
+
+        const data = await postAction('save_disks_settings', collectSettingsPayload());
+        if (!data.ok) {
+            throw new Error(data.message || 'Save failed.');
+        }
+
+        applySettings(data.settings || {}, data.capabilities || {});
+
+        if (!silent) {
+            setStatus(data.message || 'Disk settings saved.', false);
+        }
+
+        return data;
+    }
+
+    saveButton.addEventListener('click', async function () {
+        try {
+            await saveSettings(false);
+        } catch (error) {
+            setStatus('Save failed: ' + error.message, true);
+        }
+    });
+
+    runButton.addEventListener('click', async function () {
+        try {
+            setStatus('Saving Disk settings before run...', false);
+            await saveSettings(true);
+
+            setStatus('Starting Disk optimization...', false);
+            const data = await postAction('run_disks_optimization', {});
+            if (!data.ok) {
+                setStatus(data.message || 'Run failed.', true);
+                return;
+            }
+            state.executionLogPath = data.log || state.executionLogPath;
+            setStatus((data.message || 'Disk optimization started.') + ' Log: ' + state.executionLogPath, false);
+            await loadExecutionLogOutput();
+        } catch (error) {
+            setStatus('Run failed: ' + error.message, true);
+        }
+    });
+
+    renderTerminal();
+    startExecutionLogPolling();
+    registerDirtyTracking();
+    updateSaveButtonState();
+
+    Promise.all([loadSettings(), loadExecutionLogOutput()]).catch(function (error) {
+        setStatus('Initialization failed: ' + error.message, true);
+    });
+})();
+</script>

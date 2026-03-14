@@ -1,0 +1,283 @@
+Menu="power.optimizer:40"
+Title="Ethernet"
+---
+<div class="power-section">
+    <h2>Ethernet Power Management</h2>
+
+    <p>
+        Enable Ethernet power controls. EEE is applied as <strong>on</strong> and Wake on LAN as <strong>d</strong> for detected Ethernet interfaces.
+    </p>
+
+    <div class="grid">
+        <label class="toggle">
+            <input type="checkbox" id="ethernet-auto-startup-toggle">
+            Auto Execute on Startup
+        </label>
+
+        <label class="toggle">
+            <input type="checkbox" id="enable-ethernet-eee-optimization" checked>
+            Enable Energy Efficient Ethernet (EEE)
+        </label>
+
+        <label class="toggle">
+            <input type="checkbox" id="enable-ethernet-wol-optimization" checked>
+            Enable Wake on LAN Optimization
+        </label>
+    </div>
+
+    <div class="row">
+        <button type="button" class="btn" id="ethernet-save-button">Save Settings</button>
+        <button type="button" class="btn" id="ethernet-run-button">Run Now</button>
+    </div>
+
+    <div id="ethernet-status-message" class="status-message" aria-live="polite">[--:--:--] Ready.</div>
+    <pre id="ethernet-status" class="terminal-box">$ waiting for optimizer output...</pre>
+</div>
+
+<style>
+.power-section { max-width: 980px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin: 10px 0; }
+.toggle { display: inline-flex; align-items: center; gap: 8px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.status-message {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    border: 1px solid #d1d5db;
+    background: #f3f4f6;
+    color: #1f2937;
+    white-space: pre-wrap;
+}
+.status-message.error {
+    border-color: #b91c1c;
+    background: #fee2e2;
+    color: #7f1d1d;
+}
+.terminal-box {
+    margin-top: 10px;
+    background: #0b1220;
+    color: #d4f7d0;
+    padding: 12px;
+    border-radius: 4px;
+    border: 1px solid #243145;
+    white-space: pre-wrap;
+    font-family: Consolas, "Courier New", monospace;
+    min-height: 220px;
+    max-height: 420px;
+    overflow: auto;
+}
+</style>
+
+<script>
+(function () {
+    const endpoint = '/plugins/power.optimizer/include/actions.php';
+    const executionLogScope = 'ethernet';
+    const executionLogLines = 220;
+    const executionLogPollMs = 1000;
+
+    const autoStartupToggle = document.getElementById('ethernet-auto-startup-toggle');
+    const enableEee = document.getElementById('enable-ethernet-eee-optimization');
+    const enableWol = document.getElementById('enable-ethernet-wol-optimization');
+    const saveButton = document.getElementById('ethernet-save-button');
+    const runButton = document.getElementById('ethernet-run-button');
+    const statusMessage = document.getElementById('ethernet-status-message');
+    const status = document.getElementById('ethernet-status');
+
+    const state = {
+        executionLogPath: '/boot/logs/power.optimizer-ethernet.log',
+        executionLogTail: '',
+        savedSettingsSignature: ''
+    };
+
+    let executionLogTimer = null;
+
+    function nowTimestamp() {
+        return new Date().toLocaleTimeString('en-US', { hour12: false });
+    }
+
+    function renderTerminal() {
+        const lines = [];
+        lines.push('$ tail -n ' + executionLogLines + ' ' + state.executionLogPath);
+        lines.push(state.executionLogTail || '(no command output yet)');
+        status.textContent = lines.join('\n');
+        status.scrollTop = status.scrollHeight;
+    }
+
+    function setStatus(text, isError) {
+        if (!statusMessage) {
+            return;
+        }
+
+        statusMessage.textContent = '[' + nowTimestamp() + '] ' + text;
+        statusMessage.className = 'status-message' + (isError ? ' error' : '');
+    }
+
+    async function postAction(action, payload) {
+        const body = new URLSearchParams();
+        body.set('action', action);
+        const csrfTokenField = document.querySelector('input[name="csrf_token"]');
+        const csrfTokenMeta = document.querySelector('meta[name="csrf_token"]');
+        const csrfToken = (csrfTokenField && csrfTokenField.value)
+            || (csrfTokenMeta && csrfTokenMeta.content)
+            || window.csrf_token
+            || '';
+        if (csrfToken) {
+            body.set('csrf_token', csrfToken);
+        }
+        Object.keys(payload || {}).forEach((key) => body.set(key, payload[key]));
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+            body: body.toString()
+        });
+
+        const responseText = await response.text();
+        if (!responseText.trim()) {
+            throw new Error('Empty response from plugin backend.');
+        }
+
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (error) {
+            throw new Error('Invalid response from plugin backend.');
+        }
+
+        return data;
+    }
+
+    async function loadExecutionLogOutput() {
+        const data = await postAction('get_execution_log_output', {
+            scope: executionLogScope,
+            lines: String(executionLogLines)
+        });
+
+        if (!data.ok) {
+            throw new Error(data.message || 'Failed to load execution log output.');
+        }
+
+        if (data.log) {
+            state.executionLogPath = data.log;
+        }
+
+        state.executionLogTail = data.output || '';
+        renderTerminal();
+    }
+
+    function startExecutionLogPolling() {
+        if (executionLogTimer !== null) {
+            return;
+        }
+
+        executionLogTimer = window.setInterval(function () {
+            loadExecutionLogOutput().catch(function (error) {
+                setStatus('Log refresh failed: ' + error.message, true);
+            });
+        }, executionLogPollMs);
+    }
+
+    function collectSettingsPayload() {
+        return {
+            auto_execute_on_startup: autoStartupToggle.checked ? '1' : '0',
+            enable_ethernet_eee_optimization: enableEee.checked ? '1' : '0',
+            enable_ethernet_wol_optimization: enableWol.checked ? '1' : '0'
+        };
+    }
+
+    function settingsSignature(payload) {
+        return JSON.stringify(payload);
+    }
+
+    function updateSaveButtonState() {
+        if (state.savedSettingsSignature === '') {
+            saveButton.disabled = true;
+            return;
+        }
+
+        saveButton.disabled = settingsSignature(collectSettingsPayload()) === state.savedSettingsSignature;
+    }
+
+    function markSettingsSaved() {
+        state.savedSettingsSignature = settingsSignature(collectSettingsPayload());
+        updateSaveButtonState();
+    }
+
+    function registerDirtyTracking() {
+        [autoStartupToggle, enableEee, enableWol].forEach(function (element) {
+            element.addEventListener('change', updateSaveButtonState);
+            element.addEventListener('input', updateSaveButtonState);
+        });
+    }
+
+    function applySettings(settings) {
+        autoStartupToggle.checked = Number(settings.auto_execute_on_startup || 0) === 1;
+        enableEee.checked = Number(settings.enable_ethernet_eee_optimization || 0) === 1;
+        enableWol.checked = Number(settings.enable_ethernet_wol_optimization || 0) === 1;
+        markSettingsSaved();
+    }
+
+    async function loadSettings() {
+        const data = await postAction('get_ethernet_settings', {});
+        if (!data.ok) {
+            throw new Error(data.message || 'Failed to load Ethernet settings.');
+        }
+        applySettings(data.settings || {});
+    }
+
+    async function saveSettings(silent) {
+        if (!silent) {
+            setStatus('Saving Ethernet settings...', false);
+        }
+
+        const data = await postAction('save_ethernet_settings', collectSettingsPayload());
+        if (!data.ok) {
+            throw new Error(data.message || 'Save failed.');
+        }
+
+        applySettings(data.settings || {});
+
+        if (!silent) {
+            setStatus(data.message || 'Ethernet settings saved.', false);
+        }
+
+        return data;
+    }
+
+    saveButton.addEventListener('click', async function () {
+        try {
+            await saveSettings(false);
+        } catch (error) {
+            setStatus('Save failed: ' + error.message, true);
+        }
+    });
+
+    runButton.addEventListener('click', async function () {
+        try {
+            setStatus('Saving Ethernet settings before run...', false);
+            await saveSettings(true);
+
+            setStatus('Starting Ethernet optimization...', false);
+            const data = await postAction('run_ethernet_optimization', {});
+            if (!data.ok) {
+                setStatus(data.message || 'Run failed.', true);
+                return;
+            }
+            state.executionLogPath = data.log || state.executionLogPath;
+            setStatus((data.message || 'Ethernet optimization started.') + ' Log: ' + state.executionLogPath, false);
+            await loadExecutionLogOutput();
+        } catch (error) {
+            setStatus('Run failed: ' + error.message, true);
+        }
+    });
+
+    renderTerminal();
+    startExecutionLogPolling();
+    registerDirtyTracking();
+    updateSaveButtonState();
+
+    Promise.all([loadSettings(), loadExecutionLogOutput()]).catch(function (error) {
+        setStatus('Initialization failed: ' + error.message, true);
+    });
+})();
+</script>

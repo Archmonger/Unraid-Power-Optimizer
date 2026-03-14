@@ -1,0 +1,5 @@
+Menu="Settings"
+Title="Unraid Power Optimizer"
+Icon="bolt"
+Type="xmenu"
+Tabs="true"

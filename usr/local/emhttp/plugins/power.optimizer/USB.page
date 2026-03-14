@@ -1,0 +1,314 @@
+Menu="power.optimizer:60"
+Title="USB"
+---
+<div class="power-section">
+    <h2>USB Power Management</h2>
+
+    <p>
+        Configure USB autosuspend and runtime power management controls.
+    </p>
+
+    <div class="grid">
+        <label class="toggle">
+            <input type="checkbox" id="usb-auto-startup-toggle">
+            Auto Execute on Startup
+        </label>
+
+        <label class="toggle">
+            <input type="checkbox" id="enable-usb-autosuspend-optimization" checked>
+            Enable USB Autosuspend Optimization
+        </label>
+
+        <label>
+            USB Runtime Power Management<br>
+            <select id="usb-runtime-pm-target">
+                <option value="disabled">disabled</option>
+                <option value="auto">auto</option>
+            </select>
+        </label>
+
+        <label class="toggle">
+            <input type="checkbox" id="enable-usb-wakeup-optimization" checked>
+            Enable USB Wakeup Optimization
+        </label>
+
+        <label>
+            USB Wakeup Target<br>
+            <select id="usb-wakeup-target">
+                <option value="disabled">disabled</option>
+                <option value="enabled">enabled</option>
+            </select>
+        </label>
+
+        <label>
+            USB device glob (relative to /sys/bus/usb/devices)<br>
+            <input type="text" id="usb-device-glob" placeholder="*">
+        </label>
+    </div>
+
+    <div class="row">
+        <button type="button" class="btn" id="usb-save-button">Save Settings</button>
+        <button type="button" class="btn" id="usb-run-button">Run Now</button>
+    </div>
+
+    <div id="usb-status-message" class="status-message" aria-live="polite">[--:--:--] Ready.</div>
+    <pre id="usb-status" class="terminal-box">$ waiting for optimizer output...</pre>
+</div>
+
+<style>
+.power-section { max-width: 980px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin: 10px 0; }
+.toggle { display: inline-flex; align-items: center; gap: 8px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.status-message {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    border: 1px solid #d1d5db;
+    background: #f3f4f6;
+    color: #1f2937;
+    white-space: pre-wrap;
+}
+.status-message.error {
+    border-color: #b91c1c;
+    background: #fee2e2;
+    color: #7f1d1d;
+}
+.terminal-box {
+    margin-top: 10px;
+    background: #0b1220;
+    color: #d4f7d0;
+    padding: 12px;
+    border-radius: 4px;
+    border: 1px solid #243145;
+    white-space: pre-wrap;
+    font-family: Consolas, "Courier New", monospace;
+    min-height: 220px;
+    max-height: 420px;
+    overflow: auto;
+}
+input[type="text"] { width: 100%; }
+</style>
+
+<script>
+(function () {
+    const endpoint = '/plugins/power.optimizer/include/actions.php';
+    const executionLogScope = 'usb';
+    const executionLogLines = 220;
+    const executionLogPollMs = 1000;
+
+    const autoStartupToggle = document.getElementById('usb-auto-startup-toggle');
+    const enableUsb = document.getElementById('enable-usb-autosuspend-optimization');
+    const target = document.getElementById('usb-runtime-pm-target');
+    const enableUsbWakeup = document.getElementById('enable-usb-wakeup-optimization');
+    const wakeupTarget = document.getElementById('usb-wakeup-target');
+    const deviceGlob = document.getElementById('usb-device-glob');
+    const saveButton = document.getElementById('usb-save-button');
+    const runButton = document.getElementById('usb-run-button');
+    const statusMessage = document.getElementById('usb-status-message');
+    const status = document.getElementById('usb-status');
+
+    const state = {
+        executionLogPath: '/boot/logs/power.optimizer-usb.log',
+        executionLogTail: '',
+        savedSettingsSignature: ''
+    };
+
+    let executionLogTimer = null;
+
+    function nowTimestamp() {
+        return new Date().toLocaleTimeString('en-US', { hour12: false });
+    }
+
+    function renderTerminal() {
+        const lines = [];
+        lines.push('$ tail -n ' + executionLogLines + ' ' + state.executionLogPath);
+        lines.push(state.executionLogTail || '(no command output yet)');
+        status.textContent = lines.join('\n');
+        status.scrollTop = status.scrollHeight;
+    }
+
+    function setStatus(text, isError) {
+        if (!statusMessage) {
+            return;
+        }
+
+        statusMessage.textContent = '[' + nowTimestamp() + '] ' + text;
+        statusMessage.className = 'status-message' + (isError ? ' error' : '');
+    }
+
+    async function postAction(action, payload) {
+        const body = new URLSearchParams();
+        body.set('action', action);
+        const csrfTokenField = document.querySelector('input[name="csrf_token"]');
+        const csrfTokenMeta = document.querySelector('meta[name="csrf_token"]');
+        const csrfToken = (csrfTokenField && csrfTokenField.value)
+            || (csrfTokenMeta && csrfTokenMeta.content)
+            || window.csrf_token
+            || '';
+        if (csrfToken) {
+            body.set('csrf_token', csrfToken);
+        }
+        Object.keys(payload || {}).forEach((key) => body.set(key, payload[key]));
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+            body: body.toString()
+        });
+
+        const responseText = await response.text();
+        if (!responseText.trim()) {
+            throw new Error('Empty response from plugin backend.');
+        }
+
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (error) {
+            throw new Error('Invalid response from plugin backend.');
+        }
+
+        return data;
+    }
+
+    async function loadExecutionLogOutput() {
+        const data = await postAction('get_execution_log_output', {
+            scope: executionLogScope,
+            lines: String(executionLogLines)
+        });
+
+        if (!data.ok) {
+            throw new Error(data.message || 'Failed to load execution log output.');
+        }
+
+        if (data.log) {
+            state.executionLogPath = data.log;
+        }
+
+        state.executionLogTail = data.output || '';
+        renderTerminal();
+    }
+
+    function startExecutionLogPolling() {
+        if (executionLogTimer !== null) {
+            return;
+        }
+
+        executionLogTimer = window.setInterval(function () {
+            loadExecutionLogOutput().catch(function (error) {
+                setStatus('Log refresh failed: ' + error.message, true);
+            });
+        }, executionLogPollMs);
+    }
+
+    function collectSettingsPayload() {
+        return {
+            auto_execute_on_startup: autoStartupToggle.checked ? '1' : '0',
+            enable_usb_autosuspend_optimization: enableUsb.checked ? '1' : '0',
+            usb_runtime_pm_target: target.value,
+            enable_usb_wakeup_optimization: enableUsbWakeup.checked ? '1' : '0',
+            usb_wakeup_target: wakeupTarget.value,
+            usb_device_glob: deviceGlob.value
+        };
+    }
+
+    function settingsSignature(payload) {
+        return JSON.stringify(payload);
+    }
+
+    function updateSaveButtonState() {
+        if (state.savedSettingsSignature === '') {
+            saveButton.disabled = true;
+            return;
+        }
+
+        saveButton.disabled = settingsSignature(collectSettingsPayload()) === state.savedSettingsSignature;
+    }
+
+    function markSettingsSaved() {
+        state.savedSettingsSignature = settingsSignature(collectSettingsPayload());
+        updateSaveButtonState();
+    }
+
+    function registerDirtyTracking() {
+        [autoStartupToggle, enableUsb, target, enableUsbWakeup, wakeupTarget, deviceGlob].forEach(function (element) {
+            element.addEventListener('change', updateSaveButtonState);
+            element.addEventListener('input', updateSaveButtonState);
+        });
+    }
+
+    function applySettings(settings) {
+        autoStartupToggle.checked = Number(settings.auto_execute_on_startup || 0) === 1;
+        enableUsb.checked = Number(settings.enable_usb_autosuspend_optimization || 0) === 1;
+        target.value = settings.usb_runtime_pm_target || 'auto';
+        enableUsbWakeup.checked = Number(settings.enable_usb_wakeup_optimization || 0) === 1;
+        wakeupTarget.value = settings.usb_wakeup_target || 'disabled';
+        deviceGlob.value = settings.usb_device_glob || '*';
+        markSettingsSaved();
+    }
+
+    async function loadSettings() {
+        const data = await postAction('get_usb_settings', {});
+        if (!data.ok) {
+            throw new Error(data.message || 'Failed to load USB settings.');
+        }
+        applySettings(data.settings || {});
+    }
+
+    async function saveSettings(silent) {
+        if (!silent) {
+            setStatus('Saving USB settings...', false);
+        }
+
+        const data = await postAction('save_usb_settings', collectSettingsPayload());
+        if (!data.ok) {
+            throw new Error(data.message || 'Save failed.');
+        }
+
+        applySettings(data.settings || {});
+
+        if (!silent) {
+            setStatus(data.message || 'USB settings saved.', false);
+        }
+
+        return data;
+    }
+
+    saveButton.addEventListener('click', async function () {
+        try {
+            await saveSettings(false);
+        } catch (error) {
+            setStatus('Save failed: ' + error.message, true);
+        }
+    });
+
+    runButton.addEventListener('click', async function () {
+        try {
+            setStatus('Saving USB settings before run...', false);
+            await saveSettings(true);
+
+            setStatus('Starting USB optimization...', false);
+            const data = await postAction('run_usb_optimization', {});
+            if (!data.ok) {
+                setStatus(data.message || 'Run failed.', true);
+                return;
+            }
+            state.executionLogPath = data.log || state.executionLogPath;
+            setStatus((data.message || 'USB optimization started.') + ' Log: ' + state.executionLogPath, false);
+            await loadExecutionLogOutput();
+        } catch (error) {
+            setStatus('Run failed: ' + error.message, true);
+        }
+    });
+
+    renderTerminal();
+    startExecutionLogPolling();
+    registerDirtyTracking();
+    updateSaveButtonState();
+
+    Promise.all([loadSettings(), loadExecutionLogOutput()]).catch(function (error) {
+        setStatus('Initialization failed: ' + error.message, true);
+    });
+})();
+</script>

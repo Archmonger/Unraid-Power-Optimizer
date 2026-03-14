@@ -1,0 +1,968 @@
+Menu="power.optimizer:20"
+Title="PCI Express"
+---
+<div class="power-optimizer-settings">
+    <h2>PCI Express Power Management</h2>
+
+    <p>
+        Automatic mode attempts to optimize all non-blacklisted devices that report they support your requested settings. Manual mode lets you explicitly select PCI devices.
+        These power optimizations include crash failure protection that records actions taken and disables auto startup if the system halts within 60 seconds of optimization execution.
+    </p>
+
+    <p>
+        Note that most systems will need to use the "Edit Syslinux" button below to force Unraid to be ASPM aware (then reboot).
+        If you fail to boot, you will need to boot into Unraid via "safe mode" to remove the syslinux edits.
+    </p>
+
+    <div markdown="1" class="notice warning">
+    "ASPM" and "OS-Controlled" power optimizations must be enabled in your BIOS prior to using these optimizations.
+    </div>
+
+    <div class="settings-grid">
+        <label>
+            <strong>Operation Mode</strong><br>
+            <select id="operation-mode">
+                <option value="automatic">auto</option>
+                <option value="manual">manual</option>
+            </select>
+        </label>
+
+        <label>
+            <strong>Max PCI Express ASPM level</strong><br>
+            <select id="max-aspm-level">
+                <option value="1">L0</option>
+                <option value="2">L1</option>
+                <option value="3" selected>L0 &amp; L1</option>
+            </select>
+        </label>
+
+        <label>
+            <strong>Force ASPM on unsupported devices</strong><br>
+            <select id="force-aspm-mode">
+                <option value="0" selected>disabled</option>
+                <option value="4">manual only</option>
+                <option value="1">L0</option>
+                <option value="2">L1</option>
+                <option value="3">L0 &amp; L1</option>
+            </select>
+        </label>
+
+        <label class="toggle-option">
+            <input type="checkbox" id="auto-startup-toggle">
+            Auto Execute on Startup
+        </label>
+
+        <label class="toggle-option">
+            <input type="checkbox" id="enable-aspm-optimization" checked>
+            Enable ASPM Optimization
+        </label>
+
+        <label class="toggle-option">
+            <input type="checkbox" id="enable-clkpm-optimization" checked>
+            Enable CLKPM Optimization
+        </label>
+
+        <label class="toggle-option">
+            <input type="checkbox" id="enable-ltr-optimization" checked>
+            Enable LTR Optimization
+        </label>
+
+        <label class="toggle-option">
+            <input type="checkbox" id="enable-l1ss-optimization">
+            Enable L1SS Optimization (requires motherboard compatibility)
+        </label>
+
+        <label class="toggle-option">
+            <input type="checkbox" id="enable-pci-runtime-pm-optimization" checked>
+            Enable PCI Runtime PM Optimization
+        </label>
+    </div>
+
+    <p id="unsafe-settings-help" class="topology-note">
+        Advanced options are off by default. Enable only after stability testing.
+    </p>
+
+    <div class="button-row">
+        <button type="button" class="btn" id="save-settings">Save Settings</button>
+        <button type="button" class="btn" id="run-optimize">Run Now</button>
+        <button type="button" class="btn" id="edit-syslinux-button">Edit Syslinux Configuration to Allow ASPM</button>
+    </div>
+
+    <div id="syslinux-confirm-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="syslinux-confirm-title">
+        <div class="modal-card">
+            <h3 id="syslinux-confirm-title">Confirm Syslinux Edit</h3>
+            <p>
+                This will update syslinux.cfg to append ASPM kernel parameters for supported Unraid boot labels.
+            </p>
+            <p class="topology-note">
+                A reboot is required before kernel parameter changes take effect.
+            </p>
+            <div class="modal-actions">
+                <button type="button" class="btn" id="syslinux-confirm-cancel">Cancel</button>
+                <button type="button" class="btn" id="syslinux-confirm-apply">Apply Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+    <div id="automatic-panel" class="mode-panel">
+        <label for="blacklist-input"><strong>BLACK_LIST (one pattern per line)</strong></label>
+        <textarea id="blacklist-input" rows="8" spellcheck="false"></textarea>
+    </div>
+
+    <div id="manual-panel" class="mode-panel hidden">
+        <h3>Manual Controls</h3>
+
+        <div class="manual-grid">
+            <label class="toggle-option">
+                <input type="checkbox" id="manual-include-endpoints">
+                Include Endpoints
+            </label>
+            <label class="toggle-option">
+                <input type="checkbox" id="manual-include-bridges">
+                Include Bridges
+            </label>
+        </div>
+
+        <p class="topology-note">
+            Select devices in topology order. Parent bridge nodes may need to be selected and configured before their leaf endpoint nodes can successfully use ASPM.
+        </p>
+
+        <div class="device-controls">
+            <button type="button" class="btn" id="refresh-devices">Refresh Devices</button>
+            <button type="button" class="btn" id="select-all-devices">Select All Eligible</button>
+            <button type="button" class="btn" id="select-none-devices">Select None</button>
+            <span id="selected-count" class="selected-count">0 selected</span>
+        </div>
+
+        <div class="table-wrap">
+            <table class="device-table">
+                <thead>
+                    <tr>
+                        <th>Select</th>
+                        <th>Topology</th>
+                        <th>PCI ID</th>
+                        <th>Type</th>
+                        <th>ASPM Support</th>
+                        <th>ASPM Runtime</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody id="device-table-body"></tbody>
+            </table>
+        </div>
+
+        <p class="aspm-support-note">
+            ASPM Support is read from each device's PCIe Link Capabilities: <strong>L0</strong>, <strong>L1</strong>, or <strong>L0 &amp; L1</strong>.
+            <strong>unsupported</strong> means no ASPM capability bits are advertised, and <strong>unknown</strong> means the capability could not be read.
+        </p>
+    </div>
+
+    <div id="optimizer-status-message" class="status-message" aria-live="polite">[--:--:--] Ready.</div>
+    <pre id="optimizer-status" class="terminal-box">$ waiting for optimizer output...</pre>
+</div>
+
+<style>
+.power-optimizer-settings {
+    max-width: 1300px;
+}
+
+.settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+    margin: 8px 0 14px;
+}
+
+.mode-panel {
+    margin: 12px 0;
+}
+
+.manual-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.toggle-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.power-optimizer-settings textarea {
+    width: 100%;
+    min-height: 180px;
+    resize: vertical;
+    font-family: Consolas, "Courier New", monospace;
+}
+
+.button-row {
+    margin-top: 12px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.device-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin: 8px 0;
+    flex-wrap: wrap;
+}
+
+.selected-count {
+    font-weight: 600;
+}
+
+.table-wrap {
+    border: 1px solid #444;
+    border-radius: 4px;
+    overflow: auto;
+    max-height: 520px;
+}
+
+.device-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.device-table th,
+.device-table td {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid #333;
+    vertical-align: top;
+}
+
+.device-row-disabled {
+    color: #888;
+    background: #232323;
+}
+
+.topology-cell {
+    white-space: nowrap;
+    font-family: Consolas, "Courier New", monospace;
+}
+
+.status-box {
+    margin-top: 12px;
+    background: #f3f4f6;
+    color: #1f2937;
+    padding: 12px;
+    border-radius: 4px;
+    border: 1px solid #d1d5db;
+    white-space: pre-wrap;
+}
+
+.status-message {
+    margin-top: 12px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    border: 1px solid #d1d5db;
+    background: #f3f4f6;
+    color: #1f2937;
+    white-space: pre-wrap;
+}
+
+.status-message.error {
+    border-color: #b91c1c;
+    background: #fee2e2;
+    color: #7f1d1d;
+}
+
+.terminal-box {
+    margin-top: 12px;
+    background: #0b1220;
+    color: #d4f7d0;
+    padding: 12px;
+    border-radius: 4px;
+    border: 1px solid #243145;
+    white-space: pre-wrap;
+    font-family: Consolas, "Courier New", monospace;
+    min-height: 220px;
+    max-height: 420px;
+    overflow: auto;
+}
+
+.topology-note {
+    margin-top: 8px;
+}
+
+.aspm-support-note {
+    margin: 10px 0 0;
+    color: #9ca3af;
+    font-size: 0.95rem;
+}
+
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    padding: 16px;
+}
+
+.modal-card {
+    width: min(560px, 100%);
+    background: #121a2a;
+    color: #dbe6ff;
+    border: 1px solid #32415e;
+    border-radius: 8px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+    padding: 16px;
+}
+
+.modal-card h3 {
+    margin-top: 0;
+    margin-bottom: 8px;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 14px;
+}
+
+.toast-container {
+    position: fixed;
+    top: 14px;
+    right: 14px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+}
+
+.toast {
+    min-width: 260px;
+    max-width: 460px;
+    background: #183322;
+    color: #d9ffe8;
+    border: 1px solid #2a7248;
+    border-radius: 6px;
+    padding: 10px 12px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.toast.error {
+    background: #3a1616;
+    color: #ffd6d6;
+    border-color: #8f2d2d;
+}
+
+.toast.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.hidden {
+    display: none;
+}
+</style>
+
+<script>
+(function () {
+    const endpoint = '/plugins/power.optimizer/include/actions.php';
+    const executionLogScope = 'pcie';
+    const executionLogLines = 220;
+    const executionLogPollMs = 1000;
+    const statusMessage = document.getElementById('optimizer-status-message');
+    const statusBox = document.getElementById('optimizer-status');
+
+    const operationMode = document.getElementById('operation-mode');
+    const maxAspmLevel = document.getElementById('max-aspm-level');
+    const autoStartupToggle = document.getElementById('auto-startup-toggle');
+    const enableAspmOptimization = document.getElementById('enable-aspm-optimization');
+    const enableClkpmOptimization = document.getElementById('enable-clkpm-optimization');
+    const enableLtrOptimization = document.getElementById('enable-ltr-optimization');
+    const forceAspmMode = document.getElementById('force-aspm-mode');
+    const enableL1ssOptimization = document.getElementById('enable-l1ss-optimization');
+    const enablePciRuntimePmOptimization = document.getElementById('enable-pci-runtime-pm-optimization');
+    const unsafeSettingsHelp = document.getElementById('unsafe-settings-help');
+    const blacklistInput = document.getElementById('blacklist-input');
+
+    const automaticPanel = document.getElementById('automatic-panel');
+    const manualPanel = document.getElementById('manual-panel');
+
+    const manualIncludeEndpoints = document.getElementById('manual-include-endpoints');
+    const manualIncludeBridges = document.getElementById('manual-include-bridges');
+
+    const refreshDevicesButton = document.getElementById('refresh-devices');
+    const selectAllDevicesButton = document.getElementById('select-all-devices');
+    const selectNoneDevicesButton = document.getElementById('select-none-devices');
+    const selectedCount = document.getElementById('selected-count');
+    const deviceTableBody = document.getElementById('device-table-body');
+
+    const saveButton = document.getElementById('save-settings');
+    const runButton = document.getElementById('run-optimize');
+    const editSyslinuxButton = document.getElementById('edit-syslinux-button');
+    const syslinuxConfirmModal = document.getElementById('syslinux-confirm-modal');
+    const syslinuxConfirmCancelButton = document.getElementById('syslinux-confirm-cancel');
+    const syslinuxConfirmApplyButton = document.getElementById('syslinux-confirm-apply');
+    const toastContainer = document.getElementById('toast-container');
+
+    const state = {
+        devices: [],
+        selectedDevices: new Set(),
+        settings: null,
+        executionLogPath: '/boot/logs/power.optimizer-pcie.log',
+        executionLogTail: '',
+        savedSettingsSignature: ''
+    };
+
+    let executionLogTimer = null;
+    let syslinuxModalResolver = null;
+
+    function showToast(message, isError) {
+        if (!toastContainer) {
+            return;
+        }
+
+        const toast = document.createElement('div');
+        toast.className = 'toast' + (isError ? ' error' : '');
+        toast.textContent = message;
+        toastContainer.appendChild(toast);
+
+        window.requestAnimationFrame(function () {
+            toast.classList.add('visible');
+        });
+
+        window.setTimeout(function () {
+            toast.classList.remove('visible');
+            window.setTimeout(function () {
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
+                }
+            }, 170);
+        }, 4300);
+    }
+
+    function closeSyslinuxConfirmModal(confirmed) {
+        if (syslinuxConfirmModal) {
+            syslinuxConfirmModal.classList.add('hidden');
+        }
+
+        if (syslinuxModalResolver) {
+            const resolve = syslinuxModalResolver;
+            syslinuxModalResolver = null;
+            resolve(confirmed);
+        }
+    }
+
+    function openSyslinuxConfirmModal() {
+        if (!syslinuxConfirmModal) {
+            return Promise.resolve(window.confirm('Apply ASPM syslinux kernel parameter changes now?'));
+        }
+
+        syslinuxConfirmModal.classList.remove('hidden');
+        if (syslinuxConfirmApplyButton) {
+            syslinuxConfirmApplyButton.focus();
+        }
+
+        return new Promise(function (resolve) {
+            syslinuxModalResolver = resolve;
+        });
+    }
+
+    function nowTimestamp() {
+        return new Date().toLocaleTimeString('en-US', { hour12: false });
+    }
+
+    function renderTerminal() {
+        const lines = [];
+        lines.push('$ tail -n ' + executionLogLines + ' ' + state.executionLogPath);
+        lines.push(state.executionLogTail || '(no command output yet)');
+        statusBox.textContent = lines.join('\n');
+        statusBox.scrollTop = statusBox.scrollHeight;
+    }
+
+    function setStatus(text, isError) {
+        if (!statusMessage) {
+            return;
+        }
+
+        statusMessage.textContent = '[' + nowTimestamp() + '] ' + text;
+        statusMessage.className = 'status-message' + (isError ? ' error' : '');
+    }
+
+    async function postAction(action, payload) {
+        const body = new URLSearchParams();
+        body.set('action', action);
+        const csrfTokenField = document.querySelector('input[name="csrf_token"]');
+        const csrfTokenMeta = document.querySelector('meta[name="csrf_token"]');
+        const csrfToken = (csrfTokenField && csrfTokenField.value)
+            || (csrfTokenMeta && csrfTokenMeta.content)
+            || window.csrf_token
+            || '';
+        if (csrfToken) {
+            body.set('csrf_token', csrfToken);
+        }
+        Object.keys(payload || {}).forEach((key) => body.set(key, payload[key]));
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+            body: body.toString()
+        });
+
+        const responseText = await response.text();
+        if (!responseText.trim()) {
+            throw new Error('Empty response from plugin backend.');
+        }
+
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (error) {
+            throw new Error('Invalid response from plugin backend.');
+        }
+
+        return data;
+    }
+
+    async function loadExecutionLogOutput() {
+        const data = await postAction('get_execution_log_output', {
+            scope: executionLogScope,
+            lines: String(executionLogLines)
+        });
+
+        if (!data.ok) {
+            throw new Error(data.message || 'Failed to load execution log output.');
+        }
+
+        if (data.log) {
+            state.executionLogPath = data.log;
+        }
+
+        state.executionLogTail = data.output || '';
+        renderTerminal();
+    }
+
+    function startExecutionLogPolling() {
+        if (executionLogTimer !== null) {
+            return;
+        }
+
+        executionLogTimer = window.setInterval(function () {
+            loadExecutionLogOutput().catch(function (error) {
+                setStatus('Log refresh failed: ' + error.message, true);
+            });
+        }, executionLogPollMs);
+    }
+
+    function settingsSignature(payload) {
+        return JSON.stringify(payload);
+    }
+
+    function updateSaveButtonState() {
+        if (state.savedSettingsSignature === '') {
+            saveButton.disabled = true;
+            return;
+        }
+
+        saveButton.disabled = settingsSignature(collectSettingsPayload()) === state.savedSettingsSignature;
+    }
+
+    function markSettingsSaved() {
+        state.savedSettingsSignature = settingsSignature(collectSettingsPayload());
+        updateSaveButtonState();
+    }
+
+    function registerDirtyTracking() {
+        [
+            operationMode,
+            maxAspmLevel,
+            autoStartupToggle,
+            enableAspmOptimization,
+            enableClkpmOptimization,
+            enableLtrOptimization,
+            forceAspmMode,
+            enableL1ssOptimization,
+            enablePciRuntimePmOptimization,
+            blacklistInput,
+            manualIncludeEndpoints,
+            manualIncludeBridges
+        ].forEach(function (element) {
+            element.addEventListener('change', updateSaveButtonState);
+            element.addEventListener('input', updateSaveButtonState);
+        });
+    }
+
+    function csvToTextarea(csv) {
+        return (csv || '').split(',').join('\n');
+    }
+
+    function renderModePanels() {
+        const isManual = operationMode.value === 'manual';
+        manualPanel.classList.toggle('hidden', !isManual);
+        automaticPanel.classList.toggle('hidden', isManual);
+
+        unsafeSettingsHelp.textContent = isManual
+            ? 'Advanced options are off by default. Apply only after validating system stability.'
+            : 'Advanced options are off by default. Enable only after stability testing.';
+    }
+
+    function updateSelectedCount() {
+        selectedCount.textContent = state.selectedDevices.size + ' selected';
+    }
+
+    function getEligibleState(device) {
+        return device.aspm_supported || forceAspmMode.value === '4';
+    }
+
+    function orderDevicesByTopology(devices) {
+        const byId = new Map();
+        const children = new Map();
+
+        devices.forEach((device) => {
+            byId.set(device.id, device);
+            children.set(device.id, []);
+        });
+
+        devices.forEach((device) => {
+            if (device.parent_id && children.has(device.parent_id)) {
+                children.get(device.parent_id).push(device);
+            }
+        });
+
+        children.forEach((list) => list.sort((left, right) => left.id.localeCompare(right.id)));
+
+        const roots = devices
+            .filter((device) => !device.parent_id || !byId.has(device.parent_id))
+            .sort((left, right) => left.id.localeCompare(right.id));
+
+        const ordered = [];
+        const visited = new Set();
+
+        function walk(node) {
+            if (visited.has(node.id)) {
+                return;
+            }
+
+            visited.add(node.id);
+            ordered.push(node);
+            (children.get(node.id) || []).forEach(walk);
+        }
+
+        roots.forEach(walk);
+        devices.forEach((device) => {
+            if (!visited.has(device.id)) {
+                walk(device);
+            }
+        });
+
+        return ordered;
+    }
+
+    function renderDevices() {
+        const includeEndpoints = manualIncludeEndpoints.checked;
+        const includeBridges = manualIncludeBridges.checked;
+
+        deviceTableBody.textContent = '';
+
+        const orderedDevices = orderDevicesByTopology(state.devices);
+        orderedDevices.forEach((device) => {
+            if (device.type === 'endpoint' && !includeEndpoints) {
+                return;
+            }
+            if (device.type === 'bridge' && !includeBridges) {
+                return;
+            }
+
+            const selectable = getEligibleState(device);
+            const row = document.createElement('tr');
+            row.className = selectable ? '' : 'device-row-disabled';
+
+            const checkboxCell = document.createElement('td');
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.disabled = !selectable;
+            checkbox.checked = selectable && state.selectedDevices.has(device.id);
+            checkbox.addEventListener('change', function () {
+                if (checkbox.checked) {
+                    state.selectedDevices.add(device.id);
+                } else {
+                    state.selectedDevices.delete(device.id);
+                }
+                updateSelectedCount();
+                updateSaveButtonState();
+            });
+            checkboxCell.appendChild(checkbox);
+
+            const topologyCell = document.createElement('td');
+            topologyCell.className = 'topology-cell';
+            const depth = Number(device.depth || 0);
+            const treePrefix = depth > 0 ? '|- ' : '* ';
+            topologyCell.style.paddingLeft = (8 + depth * 18) + 'px';
+            topologyCell.textContent = treePrefix + (device.parent_id ? device.parent_id + ' -> ' : '') + device.id;
+
+            const idCell = document.createElement('td');
+            idCell.textContent = device.id;
+
+            const typeCell = document.createElement('td');
+            typeCell.textContent = device.type;
+
+            const aspmCell = document.createElement('td');
+            aspmCell.textContent = device.aspm_state;
+
+            const aspmRuntimeCell = document.createElement('td');
+            aspmRuntimeCell.textContent = device.aspm_runtime || 'unknown';
+
+            const descriptionCell = document.createElement('td');
+            descriptionCell.textContent = device.description;
+
+            row.appendChild(checkboxCell);
+            row.appendChild(topologyCell);
+            row.appendChild(idCell);
+            row.appendChild(typeCell);
+            row.appendChild(aspmCell);
+            row.appendChild(aspmRuntimeCell);
+            row.appendChild(descriptionCell);
+            deviceTableBody.appendChild(row);
+        });
+
+        updateSelectedCount();
+        updateSaveButtonState();
+    }
+
+    function applySettingsToForm(settings) {
+        state.settings = settings;
+
+        operationMode.value = settings.operation_mode || 'automatic';
+        maxAspmLevel.value = String(settings.max_aspm_level || 3);
+        autoStartupToggle.checked = Number(settings.auto_execute_on_startup || 0) === 1;
+
+        enableAspmOptimization.checked = Number(settings.enable_aspm_optimization || 0) === 1;
+        enableClkpmOptimization.checked = Number(settings.enable_clkpm_optimization || 0) === 1;
+        enableLtrOptimization.checked = Number(settings.enable_ltr_optimization || 0) === 1;
+        forceAspmMode.value = String(settings.force_aspm_mode ?? (Number(settings.force_aspm ?? settings.manual_force_aspm ?? 0) === 1
+            ? (settings.manual_target_aspm_mode || 3)
+            : 0));
+        enableL1ssOptimization.checked = Number(settings.enable_l1ss_optimization || 0) === 1;
+        enablePciRuntimePmOptimization.checked = Number(settings.enable_pci_runtime_pm_optimization ?? 1) === 1;
+
+        blacklistInput.value = csvToTextarea(settings.blacklist_csv || '');
+
+        manualIncludeEndpoints.checked = Number(settings.manual_include_endpoints || 0) === 1;
+        manualIncludeBridges.checked = Number(settings.manual_include_bridges || 0) === 1;
+
+        state.selectedDevices = new Set(settings.manual_selected_devices || []);
+        renderModePanels();
+        renderDevices();
+        markSettingsSaved();
+    }
+
+    async function loadStatus() {
+        const data = await postAction('get_status', {});
+        if (!data.ok) {
+            throw new Error(data.message || 'Failed to load settings.');
+        }
+
+        applySettingsToForm(data.settings || {});
+    }
+
+    async function loadDevices() {
+        const data = await postAction('get_devices', {
+            force_aspm_mode: forceAspmMode.value
+        });
+
+        if (!data.ok) {
+            throw new Error(data.message || 'Failed to load device list.');
+        }
+
+        state.devices = data.devices || [];
+        renderDevices();
+    }
+
+    function collectSettingsPayload() {
+        return {
+            blacklist: blacklistInput.value,
+            auto_execute_on_startup: autoStartupToggle.checked ? '1' : '0',
+            operation_mode: operationMode.value,
+            max_aspm_level: maxAspmLevel.value,
+            enable_aspm_optimization: enableAspmOptimization.checked ? '1' : '0',
+            enable_clkpm_optimization: enableClkpmOptimization.checked ? '1' : '0',
+            enable_ltr_optimization: enableLtrOptimization.checked ? '1' : '0',
+            force_aspm_mode: forceAspmMode.value,
+            enable_l1ss_optimization: enableL1ssOptimization.checked ? '1' : '0',
+            enable_pci_runtime_pm_optimization: enablePciRuntimePmOptimization.checked ? '1' : '0',
+            manual_include_endpoints: manualIncludeEndpoints.checked ? '1' : '0',
+            manual_include_bridges: manualIncludeBridges.checked ? '1' : '0',
+            manual_selected_devices: Array.from(state.selectedDevices).join(',')
+        };
+    }
+
+    async function saveSettings(silent) {
+        if (!silent) {
+            setStatus('Saving settings...', false);
+        }
+
+        const data = await postAction('save_settings', collectSettingsPayload());
+        if (!data.ok) {
+            throw new Error(data.message || 'Save failed.');
+        }
+
+        applySettingsToForm(data.settings || {});
+        await loadDevices();
+
+        if (!silent) {
+            setStatus('Settings saved.', false);
+        }
+
+        return data;
+    }
+
+    operationMode.addEventListener('change', function () {
+        renderModePanels();
+        updateSaveButtonState();
+    });
+
+    forceAspmMode.addEventListener('change', function () {
+        updateSaveButtonState();
+        loadDevices().catch(function (error) {
+            setStatus('Device refresh failed: ' + error.message, true);
+        });
+    });
+
+    manualIncludeEndpoints.addEventListener('change', renderDevices);
+    manualIncludeBridges.addEventListener('change', renderDevices);
+
+    refreshDevicesButton.addEventListener('click', async function () {
+        setStatus('Refreshing PCI device list...', false);
+        try {
+            await loadDevices();
+            setStatus('PCI devices refreshed.', false);
+        } catch (error) {
+            setStatus('Device refresh failed: ' + error.message, true);
+        }
+    });
+
+    selectAllDevicesButton.addEventListener('click', function () {
+        const includeEndpoints = manualIncludeEndpoints.checked;
+        const includeBridges = manualIncludeBridges.checked;
+
+        state.devices.forEach((device) => {
+            if (device.type === 'endpoint' && !includeEndpoints) {
+                return;
+            }
+            if (device.type === 'bridge' && !includeBridges) {
+                return;
+            }
+            if (getEligibleState(device)) {
+                state.selectedDevices.add(device.id);
+            }
+        });
+
+        renderDevices();
+    });
+
+    selectNoneDevicesButton.addEventListener('click', function () {
+        state.selectedDevices.clear();
+        renderDevices();
+    });
+
+    saveButton.addEventListener('click', async function () {
+        try {
+            await saveSettings(false);
+        } catch (error) {
+            setStatus('Save failed: ' + error.message, true);
+        }
+    });
+
+    if (syslinuxConfirmCancelButton) {
+        syslinuxConfirmCancelButton.addEventListener('click', function () {
+            closeSyslinuxConfirmModal(false);
+        });
+    }
+
+    if (syslinuxConfirmApplyButton) {
+        syslinuxConfirmApplyButton.addEventListener('click', function () {
+            closeSyslinuxConfirmModal(true);
+        });
+    }
+
+    if (syslinuxConfirmModal) {
+        syslinuxConfirmModal.addEventListener('click', function (event) {
+            if (event.target === syslinuxConfirmModal) {
+                closeSyslinuxConfirmModal(false);
+            }
+        });
+    }
+
+    window.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && syslinuxConfirmModal && !syslinuxConfirmModal.classList.contains('hidden')) {
+            closeSyslinuxConfirmModal(false);
+        }
+    });
+
+    editSyslinuxButton.addEventListener('click', async function () {
+        const confirmed = await openSyslinuxConfirmModal();
+        if (!confirmed) {
+            setStatus('Syslinux update cancelled.', false);
+            return;
+        }
+
+        editSyslinuxButton.disabled = true;
+        setStatus('Updating syslinux configuration...', false);
+        try {
+            const data = await postAction('edit_syslinux_aspm', {});
+            if (!data.ok) {
+                const failMessage = data.message || 'Failed to update syslinux configuration.';
+                setStatus(failMessage, true);
+                showToast(failMessage, true);
+                return;
+            }
+
+            const successMessage = data.message || 'Syslinux configuration updated.';
+            setStatus(successMessage, false);
+            showToast(successMessage, false);
+        } catch (error) {
+            const failMessage = 'Failed to update syslinux configuration: ' + error.message;
+            setStatus(failMessage, true);
+            showToast(failMessage, true);
+        } finally {
+            editSyslinuxButton.disabled = false;
+        }
+    });
+
+    runButton.addEventListener('click', async function () {
+        try {
+            setStatus('Saving settings before run...', false);
+            await saveSettings(true);
+
+            setStatus('Starting PCIe optimization...', false);
+            const data = await postAction('run_auto_optimize', {});
+            if (!data.ok) {
+                setStatus(data.message || 'Failed to start optimization.', true);
+                return;
+            }
+            state.executionLogPath = data.log || state.executionLogPath;
+            setStatus('Optimization started. Log: ' + state.executionLogPath, false);
+            await loadExecutionLogOutput();
+        } catch (error) {
+            setStatus('Run failed: ' + error.message, true);
+        }
+    });
+
+    renderTerminal();
+    startExecutionLogPolling();
+    registerDirtyTracking();
+    updateSaveButtonState();
+
+    Promise.all([loadStatus(), loadDevices(), loadExecutionLogOutput()]).catch(function (error) {
+        setStatus('Failed to initialize plugin page: ' + error.message, true);
+    });
+})();
+</script>

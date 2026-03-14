@@ -1,0 +1,333 @@
+Menu="power.optimizer:70"
+Title="I2C"
+---
+<div class="power-section">
+    <h2>I2C Power Management</h2>
+
+    <p>
+        Configure I2C runtime power management separately from PCI Express tuning.
+    </p>
+
+    <div class="grid">
+        <label class="toggle">
+            <input type="checkbox" id="i2c-auto-startup-toggle">
+            Auto Execute on Startup
+        </label>
+
+        <label>
+            I2C Runtime Power Management<br>
+            <select id="i2c-runtime-pm-mode"></select>
+        </label>
+
+        <label>
+            I2C device glob (under /sys/bus/i2c/devices)<br>
+            <input type="text" id="i2c-device-glob" placeholder="i2c-*">
+        </label>
+    </div>
+
+    <div class="row">
+        <button type="button" class="btn" id="i2c-save-button">Save Settings</button>
+        <button type="button" class="btn" id="i2c-run-button">Run Now</button>
+    </div>
+
+    <div id="i2c-status-message" class="status-message" aria-live="polite">[--:--:--] Ready.</div>
+    <pre id="i2c-status" class="terminal-box">$ waiting for optimizer output...</pre>
+</div>
+
+<style>
+.power-section { max-width: 980px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin: 10px 0; }
+.toggle { display: inline-flex; align-items: center; gap: 8px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.status-message {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    border: 1px solid #d1d5db;
+    background: #f3f4f6;
+    color: #1f2937;
+    white-space: pre-wrap;
+}
+.status-message.error {
+    border-color: #b91c1c;
+    background: #fee2e2;
+    color: #7f1d1d;
+}
+.terminal-box {
+    margin-top: 10px;
+    background: #0b1220;
+    color: #d4f7d0;
+    padding: 12px;
+    border-radius: 4px;
+    border: 1px solid #243145;
+    white-space: pre-wrap;
+    font-family: Consolas, "Courier New", monospace;
+    min-height: 220px;
+    max-height: 420px;
+    overflow: auto;
+}
+input[type="text"] { width: 100%; }
+</style>
+
+<script>
+(function () {
+    const endpoint = '/plugins/power.optimizer/include/actions.php';
+    const executionLogScope = 'i2c';
+    const executionLogLines = 220;
+    const executionLogPollMs = 1000;
+
+    const autoStartupToggle = document.getElementById('i2c-auto-startup-toggle');
+    const runtimePmMode = document.getElementById('i2c-runtime-pm-mode');
+    const deviceGlob = document.getElementById('i2c-device-glob');
+    const saveButton = document.getElementById('i2c-save-button');
+    const runButton = document.getElementById('i2c-run-button');
+    const statusMessage = document.getElementById('i2c-status-message');
+    const status = document.getElementById('i2c-status');
+
+    const state = {
+        executionLogPath: '/boot/logs/power.optimizer-i2c.log',
+        executionLogTail: '',
+        savedSettingsSignature: '',
+        runtimePmTargets: ['auto', 'on']
+    };
+
+    let executionLogTimer = null;
+
+    function nowTimestamp() {
+        return new Date().toLocaleTimeString('en-US', { hour12: false });
+    }
+
+    function renderTerminal() {
+        const lines = [];
+        lines.push('$ tail -n ' + executionLogLines + ' ' + state.executionLogPath);
+        lines.push(state.executionLogTail || '(no command output yet)');
+        status.textContent = lines.join('\n');
+        status.scrollTop = status.scrollHeight;
+    }
+
+    function setStatus(text, isError) {
+        if (!statusMessage) {
+            return;
+        }
+
+        statusMessage.textContent = '[' + nowTimestamp() + '] ' + text;
+        statusMessage.className = 'status-message' + (isError ? ' error' : '');
+    }
+
+    async function postAction(action, payload) {
+        const body = new URLSearchParams();
+        body.set('action', action);
+        const csrfTokenField = document.querySelector('input[name="csrf_token"]');
+        const csrfTokenMeta = document.querySelector('meta[name="csrf_token"]');
+        const csrfToken = (csrfTokenField && csrfTokenField.value)
+            || (csrfTokenMeta && csrfTokenMeta.content)
+            || window.csrf_token
+            || '';
+        if (csrfToken) {
+            body.set('csrf_token', csrfToken);
+        }
+        Object.keys(payload || {}).forEach((key) => body.set(key, payload[key]));
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+            body: body.toString()
+        });
+
+        const responseText = await response.text();
+        if (!responseText.trim()) {
+            throw new Error('Empty response from plugin backend.');
+        }
+
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (error) {
+            throw new Error('Invalid response from plugin backend.');
+        }
+
+        return data;
+    }
+
+    async function loadExecutionLogOutput() {
+        const data = await postAction('get_execution_log_output', {
+            scope: executionLogScope,
+            lines: String(executionLogLines)
+        });
+
+        if (!data.ok) {
+            throw new Error(data.message || 'Failed to load execution log output.');
+        }
+
+        if (data.log) {
+            state.executionLogPath = data.log;
+        }
+
+        state.executionLogTail = data.output || '';
+        renderTerminal();
+    }
+
+    function startExecutionLogPolling() {
+        if (executionLogTimer !== null) {
+            return;
+        }
+
+        executionLogTimer = window.setInterval(function () {
+            loadExecutionLogOutput().catch(function (error) {
+                setStatus('Log refresh failed: ' + error.message, true);
+            });
+        }, executionLogPollMs);
+    }
+
+    function collectSettingsPayload() {
+        return {
+            auto_execute_on_startup: autoStartupToggle.checked ? '1' : '0',
+            i2c_runtime_pm_mode: runtimePmMode.value,
+            i2c_device_glob: deviceGlob.value
+        };
+    }
+
+    function normalizeRuntimeTargets(values) {
+        const allowed = ['auto', 'on'];
+        const seen = Object.create(null);
+        const result = [];
+
+        (values || []).forEach(function (value) {
+            const normalized = String(value || '').toLowerCase();
+            if (allowed.indexOf(normalized) === -1 || seen[normalized]) {
+                return;
+            }
+            seen[normalized] = true;
+            result.push(normalized);
+        });
+
+        if (result.length === 0) {
+            return ['auto', 'on'];
+        }
+
+        return result;
+    }
+
+    function populateRuntimePmOptions(selectedMode) {
+        const options = [{ value: 'disabled', label: 'Disabled' }]
+            .concat(state.runtimePmTargets.map(function (target) {
+                return { value: target, label: target };
+            }));
+
+        runtimePmMode.innerHTML = '';
+        options.forEach(function (optionData) {
+            const option = document.createElement('option');
+            option.value = optionData.value;
+            option.textContent = optionData.label;
+            runtimePmMode.appendChild(option);
+        });
+
+        const fallback = options.some(function (item) {
+            return item.value === 'on';
+        }) ? 'on' : options[0].value;
+
+        const nextMode = options.some(function (item) {
+            return item.value === selectedMode;
+        }) ? selectedMode : fallback;
+        runtimePmMode.value = nextMode;
+    }
+
+    function settingsSignature(payload) {
+        return JSON.stringify(payload);
+    }
+
+    function updateSaveButtonState() {
+        if (state.savedSettingsSignature === '') {
+            saveButton.disabled = true;
+            return;
+        }
+
+        saveButton.disabled = settingsSignature(collectSettingsPayload()) === state.savedSettingsSignature;
+    }
+
+    function markSettingsSaved() {
+        state.savedSettingsSignature = settingsSignature(collectSettingsPayload());
+        updateSaveButtonState();
+    }
+
+    function registerDirtyTracking() {
+        [autoStartupToggle, runtimePmMode, deviceGlob].forEach(function (element) {
+            element.addEventListener('change', updateSaveButtonState);
+            element.addEventListener('input', updateSaveButtonState);
+        });
+    }
+
+    function applySettings(settings, capabilities) {
+        const caps = capabilities || {};
+        state.runtimePmTargets = normalizeRuntimeTargets(caps.i2c_runtime_pm_targets);
+
+        autoStartupToggle.checked = Number(settings.auto_execute_on_startup || 0) === 1;
+        populateRuntimePmOptions(settings.i2c_runtime_pm_mode || 'on');
+        deviceGlob.value = settings.i2c_device_glob || 'i2c-*';
+        markSettingsSaved();
+    }
+
+    async function loadSettings() {
+        const data = await postAction('get_i2c_settings', {});
+        if (!data.ok) {
+            throw new Error(data.message || 'Failed to load I2C settings.');
+        }
+        applySettings(data.settings || {}, data.capabilities || {});
+    }
+
+    async function saveSettings(silent) {
+        if (!silent) {
+            setStatus('Saving I2C settings...', false);
+        }
+
+        const data = await postAction('save_i2c_settings', collectSettingsPayload());
+        if (!data.ok) {
+            throw new Error(data.message || 'Save failed.');
+        }
+
+        applySettings(data.settings || {}, data.capabilities || {});
+
+        if (!silent) {
+            setStatus(data.message || 'I2C settings saved.', false);
+        }
+
+        return data;
+    }
+
+    saveButton.addEventListener('click', async function () {
+        try {
+            await saveSettings(false);
+        } catch (error) {
+            setStatus('Save failed: ' + error.message, true);
+        }
+    });
+
+    runButton.addEventListener('click', async function () {
+        try {
+            setStatus('Saving I2C settings before run...', false);
+            await saveSettings(true);
+
+            setStatus('Starting I2C optimization...', false);
+            const data = await postAction('run_i2c_optimization', {});
+            if (!data.ok) {
+                setStatus(data.message || 'Run failed.', true);
+                return;
+            }
+            state.executionLogPath = data.log || state.executionLogPath;
+            setStatus((data.message || 'I2C optimization started.') + ' Log: ' + state.executionLogPath, false);
+            await loadExecutionLogOutput();
+        } catch (error) {
+            setStatus('Run failed: ' + error.message, true);
+        }
+    });
+
+    renderTerminal();
+    startExecutionLogPolling();
+    registerDirtyTracking();
+    updateSaveButtonState();
+
+    Promise.all([loadSettings(), loadExecutionLogOutput()]).catch(function (error) {
+        setStatus('Initialization failed: ' + error.message, true);
+    });
+})();
+</script>
