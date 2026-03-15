@@ -5,13 +5,12 @@ Title="PCI Express"
     <h2>PCI Express Power Management</h2>
 
     <p>
-        Automatic mode attempts to optimize all non-blacklisted devices that report they support your requested settings. Manual mode lets you explicitly select PCI devices.
-        These power optimizations include crash failure protection that records actions taken and disables auto startup if the system halts within 60 seconds of optimization execution.
+        Automatic mode attempts to optimize all non-blacklisted devices. Manual mode lets you explicitly select PCI devices.
+        Since PCI Express optimizations can cause system haults, these power optimizations include crash-loop protection that will disable auto startup.
     </p>
 
     <p>
         Note that most systems will need to use the "Edit Syslinux" button below to force Unraid to be ASPM aware (then reboot).
-        If you fail to boot, you will need to boot into Unraid via "safe mode" to remove the syslinux edits.
     </p>
 
     <div markdown="1" class="notice warning">
@@ -78,10 +77,6 @@ Title="PCI Express"
         </label>
     </div>
 
-    <p id="unsafe-settings-help" class="topology-note">
-        Advanced options are off by default. Enable only after stability testing.
-    </p>
-
     <div class="button-row">
         <button type="button" class="btn" id="save-settings">Save Settings</button>
         <button type="button" class="btn" id="run-optimize">Run Now</button>
@@ -95,7 +90,7 @@ Title="PCI Express"
                 This will update syslinux.cfg to append ASPM kernel parameters for supported Unraid boot labels.
             </p>
             <p class="topology-note">
-                A reboot is required before kernel parameter changes take effect.
+                A reboot is required before kernel parameter changes take effect. If you fail to boot, you will need to boot into Unraid via "safe mode" to remove the syslinux edits.
             </p>
             <div class="modal-actions">
                 <button type="button" class="btn" id="syslinux-confirm-cancel">Cancel</button>
@@ -390,7 +385,6 @@ Title="PCI Express"
     const forceAspmMode = document.getElementById('force-aspm-mode');
     const enableL1ssOptimization = document.getElementById('enable-l1ss-optimization');
     const enablePciRuntimePmOptimization = document.getElementById('enable-pci-runtime-pm-optimization');
-    const unsafeSettingsHelp = document.getElementById('unsafe-settings-help');
     const blacklistInput = document.getElementById('blacklist-input');
 
     const automaticPanel = document.getElementById('automatic-panel');
@@ -550,12 +544,24 @@ Title="PCI Express"
         renderTerminal();
     }
 
+    function isExecutionLogPollingAllowed() {
+        if (document.hidden) {
+            return false;
+        }
+
+        return Boolean(statusBox && statusBox.offsetParent !== null);
+    }
+
     function startExecutionLogPolling() {
         if (executionLogTimer !== null) {
             return;
         }
 
         executionLogTimer = window.setInterval(function () {
+            if (!isExecutionLogPollingAllowed()) {
+                return;
+            }
+
             loadExecutionLogOutput().catch(function (error) {
                 setStatus('Log refresh failed: ' + error.message, true);
             });
@@ -608,10 +614,6 @@ Title="PCI Express"
         const isManual = operationMode.value === 'manual';
         manualPanel.classList.toggle('hidden', !isManual);
         automaticPanel.classList.toggle('hidden', isManual);
-
-        unsafeSettingsHelp.textContent = isManual
-            ? 'Advanced options are off by default. Apply only after validating system stability.'
-            : 'Advanced options are off by default. Enable only after stability testing.';
     }
 
     function updateSelectedCount() {

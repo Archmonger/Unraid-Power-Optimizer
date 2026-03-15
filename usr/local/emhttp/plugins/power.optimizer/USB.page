@@ -190,12 +190,24 @@ input[type="text"] { width: 100%; }
         renderTerminal();
     }
 
+    function isExecutionLogPollingAllowed() {
+        if (document.hidden) {
+            return false;
+        }
+
+        return Boolean(status && status.offsetParent !== null);
+    }
+
     function startExecutionLogPolling() {
         if (executionLogTimer !== null) {
             return;
         }
 
         executionLogTimer = window.setInterval(function () {
+            if (!isExecutionLogPollingAllowed()) {
+                return;
+            }
+
             loadExecutionLogOutput().catch(function (error) {
                 setStatus('Log refresh failed: ' + error.message, true);
             });

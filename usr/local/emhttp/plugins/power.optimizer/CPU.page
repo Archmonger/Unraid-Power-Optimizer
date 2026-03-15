@@ -172,12 +172,24 @@ Title="CPU"
         renderTerminal();
     }
 
+    function isExecutionLogPollingAllowed() {
+        if (document.hidden) {
+            return false;
+        }
+
+        return Boolean(status && status.offsetParent !== null);
+    }
+
     function startExecutionLogPolling() {
         if (executionLogTimer !== null) {
             return;
         }
 
         executionLogTimer = window.setInterval(function () {
+            if (!isExecutionLogPollingAllowed()) {
+                return;
+            }
+
             loadExecutionLogOutput().catch(function (error) {
                 setStatus('Log refresh failed: ' + error.message, true);
             });
@@ -214,7 +226,7 @@ Title="CPU"
     }
 
     function populateGovernorOptions(selectedMode) {
-        const options = [{ value: 'disabled', label: 'Disabled' }]
+        const options = [{ value: 'disabled', label: 'disabled' }]
             .concat(state.availableGovernors.map(function (governor) {
                 return { value: governor, label: governor };
             }));
