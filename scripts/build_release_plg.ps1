@@ -80,8 +80,17 @@ if (-not (Test-Path -LiteralPath $payloadDir)) {
     throw "Missing plugin payload directory: $payloadDir"
 }
 
-Get-ChildItem -LiteralPath $payloadDir -Filter '*.page' -File -Recurse | ForEach-Object {
+Get-ChildItem -LiteralPath $payloadDir -File -Recurse |
+    Where-Object { $_.Extension -in @('.page', '.php', '.sh', '.md') } |
+    ForEach-Object {
     Set-LfUtf8File -Path $_.FullName
+}
+
+$eventDir = Join-Path $payloadDir 'event'
+if (Test-Path -LiteralPath $eventDir) {
+    Get-ChildItem -LiteralPath $eventDir -File -Recurse | ForEach-Object {
+        Set-LfUtf8File -Path $_.FullName
+    }
 }
 
 $archiveRelativePath = "$DistDir/$pluginName-$pluginVersion.tgz"

@@ -119,8 +119,13 @@ done
 echo "Verified required extracted files."
 find "$PLUGIN_DIR" -maxdepth 2 -type f | sed "s#^$PLUGIN_DIR/##" | sort
 
+# Normalize shell-script line endings so direct event execution works on Unraid.
+find "$PLUGIN_DIR/event" -type f -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+find "$PLUGIN_DIR/scripts" -type f -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+
 chmod 755 \
   "$PLUGIN_DIR/event/disks_mounted" \
+  "$PLUGIN_DIR/event/started" \
   "$PLUGIN_DIR/scripts/pcie_power.sh" \
   "$PLUGIN_DIR/scripts/cpu_power.sh" \
   "$PLUGIN_DIR/scripts/ethernet_power.sh" \

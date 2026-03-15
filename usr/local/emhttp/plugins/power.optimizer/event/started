@@ -1,0 +1,14 @@
+#!/bin/bash
+
+DOCROOT=$(grep -Po '^chdir = \K.*' /etc/php-fpm.d/www.conf 2>/dev/null)
+if [[ -z "$DOCROOT" ]]; then
+    DOCROOT="/usr/local/emhttp"
+fi
+
+EVENT_SCRIPT="${DOCROOT}/plugins/power.optimizer/event/disks_mounted"
+if [[ ! -x "$EVENT_SCRIPT" ]]; then
+    logger -t power.optimizer "Startup 'started' event skipped: missing executable ${EVENT_SCRIPT}."
+    exit 0
+fi
+
+POWER_OPTIMIZER_EVENT_SOURCE="started" "$EVENT_SCRIPT" &

@@ -1,0 +1,122 @@
+#!/bin/bash
+
+PLUGIN_NAME="power.optimizer"
+CONFIG_FILE="/boot/config/plugins/${PLUGIN_NAME}/settings.cfg"
+LOG_DIR="/boot/logs"
+STATE_DIR="/var/run/${PLUGIN_NAME}"
+LOCK_DIR="${STATE_DIR}/startup.lock"
+LAST_RUN_FILE="${STATE_DIR}/startup.last"
+RUN_DEDUP_SECONDS=120
+EVENT_SOURCE="${POWER_OPTIMIZER_EVENT_SOURCE:-disks_mounted}"
+
+read_config_value() {
+    local key=$1
+    local default_value=$2
+    local raw_line raw_value
+
+    [[ -r "$CONFIG_FILE" ]] || {
+        echo "$default_value"
+        return 0
+    }
+
+    raw_line=$(grep -E "^${key}=" "$CONFIG_FILE" | tail -n 1)
+    if [[ -z "$raw_line" ]]; then
+        echo "$default_value"
+        return 0
+    fi
+
+    raw_value=${raw_line#${key}=}
+    raw_value=${raw_value%\"}
+    raw_value=${raw_value#\"}
+    echo "$raw_value"
+}
+
+bool_from_string() {
+    case "${1,,}" in
+        1|true|yes|on|enabled) echo 1 ;;
+        *) echo 0 ;;
+    esac
+}
+
+should_run_now() {
+    local now last
+
+    now=$(date +%s)
+    if [[ -r "$LAST_RUN_FILE" ]]; then
+        last=$(cat "$LAST_RUN_FILE" 2>/dev/null)
+        if [[ "$last" =~ ^[0-9]+$ ]] && (( now - last < RUN_DEDUP_SECONDS )); then
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+run_startup_script() {
+    local toggle_key=$1
+    local toggle_default=$2
+    local script_path=$3
+    local log_file=$4
+    shift 4
+    local args=("$@")
+
+    [[ -x "$script_path" ]] || return 0
+
+    local enabled
+    enabled=$(bool_from_string "$(read_config_value "$toggle_key" "$toggle_default")")
+    [[ "$enabled" -eq 1 ]] || return 0
+
+    mkdir -p "$LOG_DIR"
+    nohup /bin/bash "$script_path" "${args[@]}" >> "$log_file" 2>&1 &
+}
+
+mkdir -p "$STATE_DIR"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    logger -t "$PLUGIN_NAME" "Startup hook skipped: lock is already held (source=${EVENT_SOURCE})."
+    exit 0
+fi
+
+cleanup_lock() {
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
+trap cleanup_lock EXIT
+
+if ! should_run_now; then
+    logger -t "$PLUGIN_NAME" "Startup hook deduplicated: recently executed (source=${EVENT_SOURCE})."
+    exit 0
+fi
+
+date +%s > "$LAST_RUN_FILE" 2>/dev/null || true
+logger -t "$PLUGIN_NAME" "Startup hook running (source=${EVENT_SOURCE})."
+
+run_startup_script "AUTO_EXECUTE_ON_STARTUP" "0" \
+    "/usr/local/emhttp/plugins/power.optimizer/scripts/pcie_power.sh" \
+    "${LOG_DIR}/power.optimizer-pcie.log" \
+    "auto-optimize-startup"
+
+run_startup_script "CPU_AUTO_EXECUTE_ON_STARTUP" "0" \
+    "/usr/local/emhttp/plugins/power.optimizer/scripts/cpu_power.sh" \
+    "${LOG_DIR}/power.optimizer-cpu.log"
+
+run_startup_script "ETHERNET_AUTO_EXECUTE_ON_STARTUP" "0" \
+    "/usr/local/emhttp/plugins/power.optimizer/scripts/ethernet_power.sh" \
+    "${LOG_DIR}/power.optimizer-ethernet.log"
+
+run_startup_script "DISKS_AUTO_EXECUTE_ON_STARTUP" "0" \
+    "/usr/local/emhttp/plugins/power.optimizer/scripts/disks_power.sh" \
+    "${LOG_DIR}/power.optimizer-disks.log"
+
+run_startup_script "USB_AUTO_EXECUTE_ON_STARTUP" "0" \
+    "/usr/local/emhttp/plugins/power.optimizer/scripts/usb_power.sh" \
+    "${LOG_DIR}/power.optimizer-usb.log"
+
+run_startup_script "I2C_AUTO_EXECUTE_ON_STARTUP" "0" \
+    "/usr/local/emhttp/plugins/power.optimizer/scripts/i2c_power.sh" \
+    "${LOG_DIR}/power.optimizer-i2c.log"
+
+run_startup_script "SYSTEM_AUTO_EXECUTE_ON_STARTUP" "0" \
+    "/usr/local/emhttp/plugins/power.optimizer/scripts/system_tunables_power.sh" \
+    "${LOG_DIR}/power.optimizer-system-tunables.log"
+
+logger -t "$PLUGIN_NAME" "Startup hook completed (source=${EVENT_SOURCE})."
