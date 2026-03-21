@@ -73,7 +73,8 @@ $pluginVersionMatch = [regex]::Match($pluginOpen, '\bversion="([^"]+)"')
 if (-not $pluginVersionMatch.Success) {
     throw 'Could not find plugin version in PLUGIN opening tag.'
 }
-$pluginVersion = $pluginVersionMatch.Groups[1].Value
+$pluginVersion = [DateTime]::Now.ToString('yyyy.MM.dd.HHmm')
+$archiveBaseName = "$pluginName-$pluginVersion.tgz"
 
 $payloadDir = Resolve-RepoPath -Path "usr/local/emhttp/plugins/$pluginName"
 if (-not (Test-Path -LiteralPath $payloadDir)) {
@@ -93,7 +94,7 @@ if (Test-Path -LiteralPath $eventDir) {
     }
 }
 
-$archiveRelativePath = "$DistDir/$pluginName-$pluginVersion.tgz"
+$archiveRelativePath = "$DistDir/$archiveBaseName"
 $archiveFullPath = Resolve-RepoPath -Path $archiveRelativePath
 $archiveUrlPath = Convert-ToRepoRelativePath -Path $archiveFullPath
 $archiveTempPath = $archiveFullPath + '.tmp'
@@ -104,7 +105,7 @@ if (-not (Test-Path -LiteralPath $archiveDir)) {
 }
 
 $staleArchives = Get-ChildItem -LiteralPath $archiveDir -Filter "$pluginName-*.tgz" -File -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -ne "$pluginName-$pluginVersion.tgz" }
+    Where-Object { $_.Name -ne $archiveBaseName }
 
 foreach ($staleArchive in $staleArchives) {
     Remove-Item -LiteralPath $staleArchive.FullName -Force
@@ -126,7 +127,7 @@ Move-Item -LiteralPath $archiveTempPath -Destination $archiveFullPath -Force
 
 $archiveSha256 = (Get-FileHash -LiteralPath $archiveFullPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
-$archiveNamePath = "/boot/config/plugins/$pluginName/$pluginName-$pluginVersion.tgz"
+$archiveNamePath = "/boot/config/plugins/$pluginName/$archiveBaseName"
 $remoteArchiveUrl = "https://raw.githubusercontent.com/Archmonger/Unraid-Power-Optimizer/main/$archiveUrlPath"
 $archiveFileBlock = @"
 <FILE Name="$archiveNamePath">
@@ -153,10 +154,36 @@ if ($updatedManifest -eq $manifest) {
 
 $updatedManifest = [regex]::Replace(
     $updatedManifest,
+    '(<PLUGIN\b[^>]*\bversion=")[^"]+(")',
+    {
+        param($match)
+        return $match.Groups[1].Value + $pluginVersion + $match.Groups[2].Value
+    },
+    1
+)
+
+$updatedManifest = [regex]::Replace(
+    $updatedManifest,
     'PLUGIN_VERSION="[^"]+"',
     ('PLUGIN_VERSION="' + $pluginVersion + '"'),
     1
 )
+
+if ($updatedManifest -match 'PLUGIN_ARCHIVE_BASENAME="[^"]+"') {
+    $updatedManifest = [regex]::Replace(
+        $updatedManifest,
+        'PLUGIN_ARCHIVE_BASENAME="[^"]+"',
+        ('PLUGIN_ARCHIVE_BASENAME="' + $archiveBaseName + '"'),
+        1
+    )
+} else {
+    $updatedManifest = [regex]::Replace(
+        $updatedManifest,
+        'PLUGIN_VERSION="' + [regex]::Escape($pluginVersion) + '"',
+        ('PLUGIN_VERSION="' + $pluginVersion + '"' + "`n" + 'PLUGIN_ARCHIVE_BASENAME="' + $archiveBaseName + '"'),
+        1
+    )
+}
 
 $updatedContent = $updatedManifest.Replace("`r`n", "`n").Replace("`r", "`n")
 Write-Utf8NoBom -Path $sourceManifestPath -Content $updatedContent

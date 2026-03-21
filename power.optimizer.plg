@@ -1,14 +1,14 @@
 <?xml version="1.0" standalone='yes'?>
-<PLUGIN name="power.optimizer" author="Archmonger" version="2026.03.13" icon="bolt" min="6.12.0" launch="Settings/power.optimizer" pluginURL="https://raw.githubusercontent.com/Archmonger/Unraid-Power-Optimizer/main/power.optimizer.plg">
+<PLUGIN name="power.optimizer" author="Archmonger" version="2026.03.20.0034" icon="bolt" min="6.12.0" launch="Settings/power.optimizer" pluginURL="https://raw.githubusercontent.com/Archmonger/Unraid-Power-Optimizer/main/power.optimizer.plg">
 <CHANGES>
 ### 2026.03.13
 - Initial Release
 
 </CHANGES>
 
-<FILE Name="/boot/config/plugins/power.optimizer/power.optimizer-2026.03.13.tgz">
-<URL>https://raw.githubusercontent.com/Archmonger/Unraid-Power-Optimizer/main/dist/power.optimizer-2026.03.13.tgz</URL>
-<SHA256>9e8de551b525e33dacf8ce9e39aac2c365fe847420cf6ec21c88d8663d23ea8f</SHA256>
+<FILE Name="/boot/config/plugins/power.optimizer/power.optimizer-2026.03.20.0034.tgz">
+<URL>https://raw.githubusercontent.com/Archmonger/Unraid-Power-Optimizer/main/dist/power.optimizer-2026.03.20.0034.tgz</URL>
+<SHA256>37f21e2a9ff6890da97f291386a797e23df09836419824aa1268aaa275cd4eed</SHA256>
 </FILE>
 
 <FILE Run="/bin/bash"><INLINE><![CDATA[
@@ -16,11 +16,12 @@
 set -e
 
 PLUGIN_NAME="power.optimizer"
-PLUGIN_VERSION="2026.03.13"
+PLUGIN_VERSION="2026.03.20.0034"
+PLUGIN_ARCHIVE_BASENAME="power.optimizer-2026.03.20.0034.tgz"
 PLUGIN_DIR="/usr/local/emhttp/plugins/${PLUGIN_NAME}"
 CONFIG_DIR="/boot/config/plugins/${PLUGIN_NAME}"
 CONFIG_FILE="${CONFIG_DIR}/settings.cfg"
-ARCHIVE_FILE="${CONFIG_DIR}/${PLUGIN_NAME}-${PLUGIN_VERSION}.tgz"
+ARCHIVE_FILE="${CONFIG_DIR}/${PLUGIN_ARCHIVE_BASENAME}"
 INSTALL_LOG_FILE="/boot/logs/${PLUGIN_NAME}-install.log"
 PLUGIN_MGR_PRE_HOOK_DIR="/usr/local/emhttp/plugins/dynamix.plugin.manager/pre-hooks"
 PLUGIN_MGR_POST_HOOK_DIR="/usr/local/emhttp/plugins/dynamix.plugin.manager/post-hooks"
@@ -88,7 +89,7 @@ else
 fi
 
 # Keep only the currently referenced archive version.
-find "$CONFIG_DIR" -maxdepth 1 -type f -name "${PLUGIN_NAME}-*.tgz" ! -name "${PLUGIN_NAME}-${PLUGIN_VERSION}.tgz" -delete 2>/dev/null || true
+find "$CONFIG_DIR" -maxdepth 1 -type f -name "${PLUGIN_NAME}-*.tgz" ! -name "${PLUGIN_ARCHIVE_BASENAME}" -delete 2>/dev/null || true
 
 rm -rf "$PLUGIN_DIR"
 mkdir -p "$PLUGIN_DIR/include" "$PLUGIN_DIR/event" "$PLUGIN_DIR/scripts"

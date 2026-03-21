@@ -145,7 +145,8 @@ $pluginVersionMatch = [regex]::Match($pluginOpen, '\bversion="([^"]+)"')
 if (-not $pluginVersionMatch.Success) {
     throw 'Could not find plugin version in PLUGIN opening tag.'
 }
-$pluginVersion = $pluginVersionMatch.Groups[1].Value
+$pluginVersion = [DateTime]::Now.ToString('yyyy.MM.dd.HHmm')
+$localArchiveBaseName = "$pluginName-$pluginVersion.tgz"
 
 $changesMatch = [regex]::Match($manifest, '(?s)<CHANGES>\r?\n(.*?)\r?\n</CHANGES>')
 if (-not $changesMatch.Success) {
@@ -181,7 +182,7 @@ if (Test-Path -LiteralPath $eventDir) {
     }
 }
 
-$localArchiveRelativePath = "dist/local/$pluginName-$pluginVersion.tgz"
+$localArchiveRelativePath = "dist/local/$localArchiveBaseName"
 $localArchiveFullPath = Resolve-RepoPath -Path $localArchiveRelativePath
 $localArchiveUrlPath = Convert-ToRepoRelativePath -Path $localArchiveFullPath
 $localArchiveTempPath = $localArchiveFullPath + '.tmp'
@@ -189,6 +190,13 @@ $localArchiveDir = Split-Path -Parent $localArchiveFullPath
 
 if (-not (Test-Path -LiteralPath $localArchiveDir)) {
     New-Item -ItemType Directory -Path $localArchiveDir -Force | Out-Null
+}
+
+$staleLocalArchives = Get-ChildItem -LiteralPath $localArchiveDir -Filter "$pluginName-*.tgz" -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ne $localArchiveBaseName }
+
+foreach ($staleLocalArchive in $staleLocalArchives) {
+    Remove-Item -LiteralPath $staleLocalArchive.FullName -Force
 }
 
 if (Test-Path -LiteralPath $localArchiveFullPath) {
@@ -207,7 +215,32 @@ Move-Item -LiteralPath $localArchiveTempPath -Destination $localArchiveFullPath 
 
 $localArchiveSha256 = (Get-FileHash -LiteralPath $localArchiveFullPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
+$localRunInstallBody = $runInstallBody
+$localRunInstallBody = [regex]::Replace(
+    $localRunInstallBody,
+    'PLUGIN_VERSION="[^"]+"',
+    ('PLUGIN_VERSION="' + $pluginVersion + '"'),
+    1
+)
+if ($localRunInstallBody -match 'PLUGIN_ARCHIVE_BASENAME="[^"]+"') {
+    $localRunInstallBody = [regex]::Replace(
+        $localRunInstallBody,
+        'PLUGIN_ARCHIVE_BASENAME="[^"]+"',
+        ('PLUGIN_ARCHIVE_BASENAME="' + $localArchiveBaseName + '"'),
+        1
+    )
+}
+
 $localPluginOpen = $pluginOpen
+$localPluginOpen = [regex]::Replace(
+    $localPluginOpen,
+    '(\bversion=")[^"]+(")',
+    {
+        param($match)
+        return $match.Groups[1].Value + $pluginVersion + $match.Groups[2].Value
+    },
+    1
+)
 $localManifestUrlPath = Convert-ToRepoRelativePath -Path $localManifestPath
 $localPluginUrl = "$normalizedBaseUrl/$localManifestUrlPath"
 if ($localPluginOpen -match '\bpluginURL="[^"]*"') {
@@ -224,15 +257,15 @@ $local = New-Object System.Text.StringBuilder
 [void]$local.AppendLine('</CHANGES>')
 [void]$local.AppendLine('')
 
-[void]$local.AppendLine(('<FILE Name="/boot/config/plugins/{0}/{0}-{1}.tgz">' -f $pluginName, $pluginVersion))
+[void]$local.AppendLine(('<FILE Name="/boot/config/plugins/{0}/{1}">' -f $pluginName, $localArchiveBaseName))
 [void]$local.AppendLine(('<URL>{0}/{1}</URL>' -f $normalizedBaseUrl, $localArchiveUrlPath))
 [void]$local.AppendLine(('<SHA256>{0}</SHA256>' -f $localArchiveSha256))
 [void]$local.AppendLine('</FILE>')
 [void]$local.AppendLine('')
 
 [void]$local.AppendLine('<FILE Run="/bin/bash"><INLINE><![CDATA[')
-[void]$local.Append($runInstallBody)
-if (-not $runInstallBody.EndsWith("`n")) {
+[void]$local.Append($localRunInstallBody)
+if (-not $localRunInstallBody.EndsWith("`n")) {
     [void]$local.AppendLine('')
 }
 [void]$local.AppendLine(']]></INLINE></FILE>')
