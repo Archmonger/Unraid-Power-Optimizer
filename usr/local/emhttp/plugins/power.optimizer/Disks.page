@@ -38,6 +38,7 @@ Title="Disks"
     <div class="row">
         <button type="button" class="btn" id="disks-save-button">Save Settings</button>
         <button type="button" class="btn" id="disks-run-button">Run Now</button>
+        <button type="button" class="btn" id="disks-spin-down-all-button">Spin Down All Drives</button>
     </div>
 
     <div id="disks-status-message" class="status-message" aria-live="polite">[--:--:--] Ready.</div>
@@ -91,6 +92,7 @@ Title="Disks"
     const ataRuntimePmMode = document.getElementById('ata-runtime-pm-mode');
     const saveButton = document.getElementById('disks-save-button');
     const runButton = document.getElementById('disks-run-button');
+    const spinDownAllButton = document.getElementById('disks-spin-down-all-button');
     const statusMessage = document.getElementById('disks-status-message');
     const status = document.getElementById('disks-status');
 
@@ -357,6 +359,23 @@ Title="Disks"
             await loadExecutionLogOutput();
         } catch (error) {
             setStatus('Run failed: ' + error.message, true);
+        }
+    });
+
+    spinDownAllButton.addEventListener('click', async function () {
+        try {
+            setStatus('Requesting spin down for all /dev/sd? drives...', false);
+            const data = await postAction('run_disks_spin_down_all', {});
+            if (!data.ok) {
+                setStatus(data.message || 'Spin down request failed.', true);
+                return;
+            }
+
+            state.executionLogPath = data.log || state.executionLogPath;
+            setStatus((data.message || 'Spin down requested for all drives.') + ' Log: ' + state.executionLogPath, false);
+            await loadExecutionLogOutput();
+        } catch (error) {
+            setStatus('Spin down request failed: ' + error.message, true);
         }
     });
 

@@ -34,6 +34,24 @@ Title="CPU"
         <button type="button" class="btn" id="cpu-run-button">Run Now</button>
     </div>
 
+    <div class="live-stats-panel" id="cpu-live-stats-panel">
+        <h3>Live Statistics</h3>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Current CPU Governor</div>
+                <div class="stat-value" id="cpu-live-governor">unknown</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">System Average CPU Frequency</div>
+                <div class="stat-value" id="cpu-live-average-ghz">n/a</div>
+            </div>
+        </div>
+        <div class="stat-block">
+            <div class="stat-label">CPU C-State Residency (Supported States)</div>
+            <pre class="stat-pre" id="cpu-live-cstates">Waiting for baseline sample...</pre>
+        </div>
+    </div>
+
     <div id="cpu-status-message" class="status-message" aria-live="polite">[--:--:--] Ready.</div>
     <pre id="cpu-status" class="terminal-box">$ waiting for optimizer output...</pre>
 </div>
@@ -70,6 +88,51 @@ Title="CPU"
     max-height: 420px;
     overflow: auto;
 }
+.live-stats-panel {
+    margin-top: 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    background: #f9fafb;
+    padding: 10px;
+}
+.live-stats-panel h3 {
+    margin: 0 0 8px 0;
+    font-size: 15px;
+}
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px;
+}
+.stat-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    background: #ffffff;
+    padding: 8px 10px;
+}
+.stat-label {
+    color: #374151;
+    font-size: 12px;
+    margin-bottom: 2px;
+}
+.stat-value {
+    color: #111827;
+    font-size: 15px;
+    font-weight: 600;
+}
+.stat-block {
+    margin-top: 10px;
+}
+.stat-pre {
+    margin: 0;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    background: #ffffff;
+    color: #111827;
+    padding: 8px 10px;
+    white-space: pre-wrap;
+    font-family: Consolas, "Courier New", monospace;
+}
 </style>
 
 <script>
@@ -78,6 +141,7 @@ Title="CPU"
     const executionLogScope = 'cpu';
     const executionLogLines = 220;
     const executionLogPollMs = 1000;
+    const liveStatsPollMs = 2000;
 
     const autoStartupToggle = document.getElementById('cpu-auto-startup-toggle');
     const governorMode = document.getElementById('cpu-governor-mode');
@@ -85,6 +149,10 @@ Title="CPU"
     const turboMode = document.getElementById('cpu-turbo-mode');
     const saveButton = document.getElementById('cpu-save-button');
     const runButton = document.getElementById('cpu-run-button');
+    const liveStatsPanel = document.getElementById('cpu-live-stats-panel');
+    const liveGovernor = document.getElementById('cpu-live-governor');
+    const liveAverageGhz = document.getElementById('cpu-live-average-ghz');
+    const liveCStates = document.getElementById('cpu-live-cstates');
     const statusMessage = document.getElementById('cpu-status-message');
     const status = document.getElementById('cpu-status');
 
@@ -93,10 +161,12 @@ Title="CPU"
         executionLogTail: '',
         savedSettingsSignature: '',
         availableGovernors: [],
-        supportsCpuTurbo: false
+        supportsCpuTurbo: false,
+        previousCStateTotalsUs: null
     };
 
     let executionLogTimer = null;
+    let liveStatsTimer = null;
 
     function nowTimestamp() {
         return new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -194,6 +264,110 @@ Title="CPU"
                 setStatus('Log refresh failed: ' + error.message, true);
             });
         }, executionLogPollMs);
+    }
+
+    function isLiveStatsPollingAllowed() {
+        if (document.hidden) {
+            return false;
+        }
+
+        return Boolean(liveStatsPanel && liveStatsPanel.offsetParent !== null);
+    }
+
+    function computeCStatePercentages(currentTotals, previousTotals) {
+        const deltas = [];
+        let totalDelta = 0;
+
+        Object.keys(currentTotals || {}).forEach(function (stateName) {
+            const currentValue = Number(currentTotals[stateName] || 0);
+            const previousValue = Number((previousTotals || {})[stateName] || 0);
+            const delta = currentValue - previousValue;
+
+            if (delta <= 0) {
+                return;
+            }
+
+            totalDelta += delta;
+            deltas.push({ state: stateName, delta: delta });
+        });
+
+        if (totalDelta <= 0) {
+            return [];
+        }
+
+        deltas.sort(function (left, right) {
+            return left.state.localeCompare(right.state);
+        });
+
+        return deltas.map(function (entry) {
+            return {
+                state: entry.state,
+                percent: (entry.delta / totalDelta) * 100
+            };
+        });
+    }
+
+    function renderLiveStatistics(stats) {
+        const governorText = String((stats && stats.current_governor) || 'unknown');
+        liveGovernor.textContent = governorText;
+
+        if (stats && typeof stats.average_cpu_ghz === 'number' && isFinite(stats.average_cpu_ghz)) {
+            liveAverageGhz.textContent = stats.average_cpu_ghz.toFixed(3) + ' GHz';
+        } else {
+            liveAverageGhz.textContent = 'n/a';
+        }
+
+        const currentTotals = (stats && stats.c_state_time_totals_us) || {};
+        const stateNames = Object.keys(currentTotals);
+
+        if (stateNames.length === 0) {
+            liveCStates.textContent = 'C-state statistics are unavailable on this system.';
+            state.previousCStateTotalsUs = null;
+            return;
+        }
+
+        if (state.previousCStateTotalsUs === null) {
+            liveCStates.textContent = 'Collecting baseline sample...';
+            state.previousCStateTotalsUs = Object.assign({}, currentTotals);
+            return;
+        }
+
+        const percentages = computeCStatePercentages(currentTotals, state.previousCStateTotalsUs);
+        state.previousCStateTotalsUs = Object.assign({}, currentTotals);
+
+        if (percentages.length === 0) {
+            liveCStates.textContent = 'No measurable C-state residency change in this interval.';
+            return;
+        }
+
+        liveCStates.textContent = percentages.map(function (entry) {
+            return entry.state + ': ' + entry.percent.toFixed(1) + '%';
+        }).join('\n');
+    }
+
+    async function loadLiveStatistics() {
+        const data = await postAction('get_cpu_live_statistics', {});
+        if (!data.ok) {
+            throw new Error(data.message || 'Failed to load live CPU statistics.');
+        }
+
+        renderLiveStatistics(data.stats || {});
+    }
+
+    function startLiveStatsPolling() {
+        if (liveStatsTimer !== null) {
+            return;
+        }
+
+        liveStatsTimer = window.setInterval(function () {
+            if (!isLiveStatsPollingAllowed()) {
+                return;
+            }
+
+            loadLiveStatistics().catch(function (error) {
+                setStatus('Live stats refresh failed: ' + error.message, true);
+            });
+        }, liveStatsPollMs);
     }
 
     function collectSettingsPayload() {
@@ -354,11 +528,18 @@ Title="CPU"
 
     renderTerminal();
     startExecutionLogPolling();
+    startLiveStatsPolling();
     registerDirtyTracking();
     updateSaveButtonState();
 
     Promise.all([loadSettings(), loadExecutionLogOutput()]).catch(function (error) {
         setStatus('Initialization failed: ' + error.message, true);
     });
+
+    if (isLiveStatsPollingAllowed()) {
+        loadLiveStatistics().catch(function (error) {
+            setStatus('Live stats initialization failed: ' + error.message, true);
+        });
+    }
 })();
 </script>

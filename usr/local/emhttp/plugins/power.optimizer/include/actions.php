@@ -7,6 +7,7 @@ $pcieScriptFile = "/usr/local/emhttp/plugins/{$pluginName}/scripts/pcie_power.sh
 $cpuScriptFile = "/usr/local/emhttp/plugins/{$pluginName}/scripts/cpu_power.sh";
 $ethernetScriptFile = "/usr/local/emhttp/plugins/{$pluginName}/scripts/ethernet_power.sh";
 $disksScriptFile = "/usr/local/emhttp/plugins/{$pluginName}/scripts/disks_power.sh";
+$disksSpinDownScriptFile = "/usr/local/emhttp/plugins/{$pluginName}/scripts/disks_spin_down_all.sh";
 $usbScriptFile = "/usr/local/emhttp/plugins/{$pluginName}/scripts/usb_power.sh";
 $i2cScriptFile = "/usr/local/emhttp/plugins/{$pluginName}/scripts/i2c_power.sh";
 $systemTunablesScriptFile = "/usr/local/emhttp/plugins/{$pluginName}/scripts/system_tunables_power.sh";
@@ -531,6 +532,133 @@ function cpu_capabilities(): array
     return [
         'available_governors' => $availableGovernors,
         'supports_cpu_turbo' => $supportsCpuTurbo,
+    ];
+}
+
+function read_trimmed_file_value(string $path): ?string
+{
+    if (!is_readable($path)) {
+        return null;
+    }
+
+    $raw = @file_get_contents($path);
+    if ($raw === false) {
+        return null;
+    }
+
+    return trim(str_replace(["\r", "\n"], ' ', (string)$raw));
+}
+
+function current_cpu_governor_label(): string
+{
+    $governorFiles = glob('/sys/devices/system/cpu/cpufreq/policy*/scaling_governor');
+    if ($governorFiles === false || count($governorFiles) === 0) {
+        $governorFiles = ['/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor'];
+    }
+
+    $seen = [];
+    foreach ($governorFiles as $path) {
+        $value = read_trimmed_file_value($path);
+        if ($value === null || $value === '') {
+            continue;
+        }
+
+        $seen[strtolower($value)] = true;
+    }
+
+    if (count($seen) === 0) {
+        return 'unknown';
+    }
+
+    $governors = array_keys($seen);
+    sort($governors, SORT_STRING);
+
+    if (count($governors) === 1) {
+        return $governors[0];
+    }
+
+    return 'mixed (' . implode(', ', $governors) . ')';
+}
+
+function average_cpu_ghz(): ?float
+{
+    $samples = [];
+
+    $freqFiles = glob('/sys/devices/system/cpu/cpufreq/policy*/scaling_cur_freq');
+    if ($freqFiles !== false) {
+        foreach ($freqFiles as $path) {
+            $value = read_trimmed_file_value($path);
+            if ($value === null || preg_match('/^\d+$/', $value) !== 1) {
+                continue;
+            }
+
+            $khz = (int)$value;
+            if ($khz > 0) {
+                $samples[] = $khz / 1000000.0;
+            }
+        }
+    }
+
+    if (count($samples) === 0 && is_readable('/proc/cpuinfo')) {
+        $cpuInfo = @file_get_contents('/proc/cpuinfo');
+        if ($cpuInfo !== false && preg_match_all('/^cpu MHz\s*:\s*([0-9]+(?:\.[0-9]+)?)/mi', (string)$cpuInfo, $matches) >= 1) {
+            foreach ($matches[1] as $mhzValue) {
+                $mhz = (float)$mhzValue;
+                if ($mhz > 0) {
+                    $samples[] = $mhz / 1000.0;
+                }
+            }
+        }
+    }
+
+    if (count($samples) === 0) {
+        return null;
+    }
+
+    return array_sum($samples) / count($samples);
+}
+
+function cpu_c_state_time_totals_us(): array
+{
+    $totals = [];
+    $timeFiles = glob('/sys/devices/system/cpu/cpu*/cpuidle/state*/time');
+    if ($timeFiles === false) {
+        return $totals;
+    }
+
+    foreach ($timeFiles as $timePath) {
+        $timeValue = read_trimmed_file_value($timePath);
+        if ($timeValue === null || preg_match('/^\d+$/', $timeValue) !== 1) {
+            continue;
+        }
+
+        $namePath = dirname($timePath) . '/name';
+        $stateName = read_trimmed_file_value($namePath) ?? basename(dirname($timePath));
+        $stateName = strtoupper(preg_replace('/\s+/', '', $stateName));
+        if ($stateName === '') {
+            continue;
+        }
+
+        if (!isset($totals[$stateName])) {
+            $totals[$stateName] = 0;
+        }
+
+        $totals[$stateName] += (int)$timeValue;
+    }
+
+    ksort($totals, SORT_STRING);
+    return $totals;
+}
+
+function cpu_live_statistics(): array
+{
+    $averageGhz = average_cpu_ghz();
+
+    return [
+        'captured_at_unix_ms' => (int)round(microtime(true) * 1000),
+        'current_governor' => current_cpu_governor_label(),
+        'average_cpu_ghz' => $averageGhz === null ? null : round($averageGhz, 3),
+        'c_state_time_totals_us' => cpu_c_state_time_totals_us(),
     ];
 }
 
@@ -1397,6 +1525,13 @@ if ($action === 'get_cpu_settings') {
     ]);
 }
 
+if ($action === 'get_cpu_live_statistics') {
+    send_json(200, [
+        'ok' => true,
+        'stats' => cpu_live_statistics(),
+    ]);
+}
+
 if ($action === 'save_cpu_settings') {
     $cpuCapabilities = cpu_capabilities();
     $availableGovernors = $cpuCapabilities['available_governors'];
@@ -1636,6 +1771,16 @@ if ($action === 'run_disks_optimization') {
     $logFile = $logBaseDir . '/power.optimizer-disks.log';
     run_in_background('/bin/bash ' . escapeshellarg($disksScriptFile), $logFile);
     send_json(200, ['ok' => true, 'message' => 'Disks optimization started.', 'log' => $logFile]);
+}
+
+if ($action === 'run_disks_spin_down_all') {
+    if (!is_file($disksSpinDownScriptFile)) {
+        send_json(500, ['ok' => false, 'message' => 'Disks spin-down script is missing.', 'script' => $disksSpinDownScriptFile]);
+    }
+
+    $logFile = $logBaseDir . '/power.optimizer-disks.log';
+    run_in_background('/bin/bash ' . escapeshellarg($disksSpinDownScriptFile), $logFile);
+    send_json(200, ['ok' => true, 'message' => 'Spin down requested for all /dev/sd? devices.', 'log' => $logFile]);
 }
 
 if ($action === 'get_usb_settings') {
