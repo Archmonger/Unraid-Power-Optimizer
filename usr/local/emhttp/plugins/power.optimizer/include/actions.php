@@ -101,6 +101,10 @@ function default_settings(): array
         'NMI_WATCHDOG_TARGET' => '0',
         'ENABLE_VM_WRITEBACK_TIMEOUT_OPTIMIZATION' => '1',
         'VM_DIRTY_WRITEBACK_CENTISECS' => '1500',
+        'VFS_CACHE_PRESSURE' => '1',
+        'VFS_CACHE_MAX_AGE' => '60000',
+        'ZFS_ARC_MIN_PERCENT' => '10',
+        'ZFS_ARC_MAX_PERCENT' => '40',
         // Compatibility key retained for migration support with prior script versions.
         'VM_WRITEBACK_TIMEOUT_CENTISECS' => '1500',
         'POWER_AWARE_CPU_SCHEDULER_MODE' => '2',
@@ -783,6 +787,14 @@ function system_tunables_settings_from_raw(array $raw): array
         100,
         60000
     );
+    $vfsCachePressure = normalize_int_range($raw['VFS_CACHE_PRESSURE'] ?? 1, 1, 1, 10000);
+    $vfsCacheMaxAge = normalize_int_range($raw['VFS_CACHE_MAX_AGE'] ?? 60000, 60000, 1, 31536000);
+    $zfsArcMinPercent = normalize_int_range($raw['ZFS_ARC_MIN_PERCENT'] ?? 10, 10, 0, 100);
+    $zfsArcMaxPercent = normalize_int_range($raw['ZFS_ARC_MAX_PERCENT'] ?? 40, 40, 0, 100);
+
+    if ($zfsArcMinPercent > 0 && $zfsArcMaxPercent > 0 && $zfsArcMinPercent > $zfsArcMaxPercent) {
+        $zfsArcMinPercent = $zfsArcMaxPercent;
+    }
 
     return [
         'auto_execute_on_startup' => normalize_boolean($raw['SYSTEM_AUTO_EXECUTE_ON_STARTUP'] ?? null, 0),
@@ -791,6 +803,10 @@ function system_tunables_settings_from_raw(array $raw): array
         'disable_nmi_watchdog' => $nmiTarget === 0 ? 1 : 0,
         'enable_vm_writeback_timeout_optimization' => normalize_boolean($raw['ENABLE_VM_WRITEBACK_TIMEOUT_OPTIMIZATION'] ?? null, 1),
         'vm_dirty_writeback_centisecs' => $vmDirtyWritebackCentisecs,
+        'vfs_cache_pressure' => $vfsCachePressure,
+        'vfs_cache_max_age' => $vfsCacheMaxAge,
+        'zfs_arc_min_percent' => $zfsArcMinPercent,
+        'zfs_arc_max_percent' => $zfsArcMaxPercent,
         'power_aware_cpu_scheduler_mode' => $schedulerMode,
         // Legacy fields retained for compatibility with older UI builds.
         'enable_power_aware_cpu_scheduler_optimization' => 1,
@@ -1742,6 +1758,14 @@ if ($action === 'save_system_tunables_settings') {
         100,
         60000
     );
+    $vfsCachePressure = normalize_int_range($_POST['vfs_cache_pressure'] ?? 1, 1, 1, 10000);
+    $vfsCacheMaxAge = normalize_int_range($_POST['vfs_cache_max_age'] ?? 60000, 60000, 1, 31536000);
+    $zfsArcMinPercent = normalize_int_range($_POST['zfs_arc_min_percent'] ?? 10, 10, 0, 100);
+    $zfsArcMaxPercent = normalize_int_range($_POST['zfs_arc_max_percent'] ?? 40, 40, 0, 100);
+
+    if ($zfsArcMinPercent > 0 && $zfsArcMaxPercent > 0 && $zfsArcMinPercent > $zfsArcMaxPercent) {
+        $zfsArcMinPercent = $zfsArcMaxPercent;
+    }
 
     $updates = [
         'SYSTEM_AUTO_EXECUTE_ON_STARTUP' => (string)normalize_boolean($_POST['auto_execute_on_startup'] ?? null, 0),
@@ -1751,6 +1775,10 @@ if ($action === 'save_system_tunables_settings') {
         'NMI_WATCHDOG_TARGET' => $disableNmiWatchdog ? '0' : '1',
         'ENABLE_VM_WRITEBACK_TIMEOUT_OPTIMIZATION' => (string)$vmWritebackEnabled,
         'VM_DIRTY_WRITEBACK_CENTISECS' => (string)$vmDirtyWritebackCentisecs,
+        'VFS_CACHE_PRESSURE' => (string)$vfsCachePressure,
+        'VFS_CACHE_MAX_AGE' => (string)$vfsCacheMaxAge,
+        'ZFS_ARC_MIN_PERCENT' => (string)$zfsArcMinPercent,
+        'ZFS_ARC_MAX_PERCENT' => (string)$zfsArcMaxPercent,
         // Keep compatibility key synchronized with existing settings files.
         'VM_WRITEBACK_TIMEOUT_CENTISECS' => (string)$vmDirtyWritebackCentisecs,
         'POWER_AWARE_CPU_SCHEDULER_MODE' => (string)$schedulerMode,

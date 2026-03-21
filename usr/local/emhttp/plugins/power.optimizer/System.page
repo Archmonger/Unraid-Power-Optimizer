@@ -40,6 +40,26 @@ Title="System Tunables"
         </label>
 
         <label>
+            vm.vfs_cache_pressure<br>
+            <input type="number" id="vfs-cache-pressure" min="1" max="10000" step="1">
+        </label>
+
+        <label>
+            vm.vfs_cache_max_age<br>
+            <input type="number" id="vfs-cache-max-age" min="1" max="31536000" step="1">
+        </label>
+
+        <label>
+            ZFS ARC min (% of RAM, 0 to disable)<br>
+            <input type="number" id="zfs-arc-min-percent" min="0" max="100" step="1">
+        </label>
+
+        <label>
+            ZFS ARC max (% of RAM, 0 to disable)<br>
+            <input type="number" id="zfs-arc-max-percent" min="0" max="100" step="1">
+        </label>
+
+        <label>
             Power Aware Linux Scheduler<br>
             <select id="power-aware-cpu-scheduler-mode">
                 <option value="0">no power savings</option>
@@ -106,6 +126,10 @@ input[type="number"] { width: 100%; }
     const disableNmiWatchdog = document.getElementById('disable-nmi-watchdog');
     const enableVmWritebackTimeoutOptimization = document.getElementById('enable-vm-writeback-timeout-optimization');
     const vmDirtyWritebackCentisecs = document.getElementById('vm-dirty-writeback-centisecs');
+    const vfsCachePressure = document.getElementById('vfs-cache-pressure');
+    const vfsCacheMaxAge = document.getElementById('vfs-cache-max-age');
+    const zfsArcMinPercent = document.getElementById('zfs-arc-min-percent');
+    const zfsArcMaxPercent = document.getElementById('zfs-arc-max-percent');
     const powerAwareSchedulerMode = document.getElementById('power-aware-cpu-scheduler-mode');
 
     const saveButton = document.getElementById('system-save-button');
@@ -227,6 +251,10 @@ input[type="number"] { width: 100%; }
             disable_nmi_watchdog: disableNmiWatchdog.checked ? '1' : '0',
             enable_vm_writeback_timeout_optimization: enableVmWritebackTimeoutOptimization.checked ? '1' : '0',
             vm_dirty_writeback_centisecs: vmDirtyWritebackCentisecs.value,
+            vfs_cache_pressure: vfsCachePressure.value,
+            vfs_cache_max_age: vfsCacheMaxAge.value,
+            zfs_arc_min_percent: zfsArcMinPercent.value,
+            zfs_arc_max_percent: zfsArcMaxPercent.value,
             power_aware_cpu_scheduler_mode: powerAwareSchedulerMode.value
         };
     }
@@ -257,6 +285,10 @@ input[type="number"] { width: 100%; }
             disableNmiWatchdog,
             enableVmWritebackTimeoutOptimization,
             vmDirtyWritebackCentisecs,
+            vfsCachePressure,
+            vfsCacheMaxAge,
+            zfsArcMinPercent,
+            zfsArcMaxPercent,
             powerAwareSchedulerMode
         ].forEach(function (element) {
             element.addEventListener('change', updateSaveButtonState);
@@ -273,6 +305,10 @@ input[type="number"] { width: 100%; }
 
         enableVmWritebackTimeoutOptimization.checked = Number(settings.enable_vm_writeback_timeout_optimization || 0) === 1;
         vmDirtyWritebackCentisecs.value = String(settings.vm_dirty_writeback_centisecs || 1500);
+        vfsCachePressure.value = String(settings.vfs_cache_pressure ?? 1);
+        vfsCacheMaxAge.value = String(settings.vfs_cache_max_age ?? 60000);
+        zfsArcMinPercent.value = String(settings.zfs_arc_min_percent ?? 10);
+        zfsArcMaxPercent.value = String(settings.zfs_arc_max_percent ?? 40);
 
         powerAwareSchedulerMode.value = String(settings.power_aware_cpu_scheduler_mode || 2);
         markSettingsSaved();

@@ -64,6 +64,35 @@ int_in_range() {
     echo "$raw"
 }
 
+read_memtotal_bytes() {
+    local mem_total_kb
+
+    [[ -r /proc/meminfo ]] || {
+        echo 0
+        return 0
+    }
+
+    mem_total_kb=$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo)
+    if [[ ! "$mem_total_kb" =~ ^[0-9]+$ ]]; then
+        echo 0
+        return 0
+    fi
+
+    echo $(( mem_total_kb * 1024 ))
+}
+
+percent_of_total_bytes() {
+    local percent=$1
+    local total_bytes=$2
+
+    if (( percent <= 0 || total_bytes <= 0 )); then
+        echo 0
+        return 0
+    fi
+
+    echo $(( total_bytes * percent / 100 ))
+}
+
 enable_audio_codec_pm=$(bool_from_string "$(read_config_value "ENABLE_AUDIO_CODEC_PM_OPTIMIZATION" "1")")
 audio_codec_power_save_seconds=$(int_in_range "$(read_config_value "AUDIO_CODEC_POWER_SAVE_SECONDS" "1")" 1 0 60)
 
@@ -86,6 +115,19 @@ fi
 enable_vm_writeback_timeout=$(bool_from_string "$(read_config_value "ENABLE_VM_WRITEBACK_TIMEOUT_OPTIMIZATION" "1")")
 legacy_vm_writeback_centisecs=$(int_in_range "$(read_config_value "VM_WRITEBACK_TIMEOUT_CENTISECS" "1500")" 1500 100 60000)
 vm_dirty_writeback_centisecs=$(int_in_range "$(read_config_value "VM_DIRTY_WRITEBACK_CENTISECS" "$legacy_vm_writeback_centisecs")" 1500 100 60000)
+vfs_cache_pressure=$(int_in_range "$(read_config_value "VFS_CACHE_PRESSURE" "1")" 1 1 10000)
+vfs_cache_max_age=$(int_in_range "$(read_config_value "VFS_CACHE_MAX_AGE" "60000")" 60000 1 31536000)
+zfs_arc_min_percent=$(int_in_range "$(read_config_value "ZFS_ARC_MIN_PERCENT" "10")" 10 0 100)
+zfs_arc_max_percent=$(int_in_range "$(read_config_value "ZFS_ARC_MAX_PERCENT" "40")" 40 0 100)
+
+if [[ "$zfs_arc_min_percent" -gt 0 && "$zfs_arc_max_percent" -gt 0 && "$zfs_arc_min_percent" -gt "$zfs_arc_max_percent" ]]; then
+    echo "ZFS ARC min percent (${zfs_arc_min_percent}%) was above max (${zfs_arc_max_percent}%); clamping min to max."
+    zfs_arc_min_percent="$zfs_arc_max_percent"
+fi
+
+system_memory_bytes=$(read_memtotal_bytes)
+zfs_arc_min_bytes=$(percent_of_total_bytes "$zfs_arc_min_percent" "$system_memory_bytes")
+zfs_arc_max_bytes=$(percent_of_total_bytes "$zfs_arc_max_percent" "$system_memory_bytes")
 
 system_auto_startup=$(bool_from_string "$(read_config_value "SYSTEM_AUTO_EXECUTE_ON_STARTUP" "0")")
 disable_nmi_watchdog=0
@@ -100,6 +142,10 @@ echo "System setting DISABLE_NMI_WATCHDOG=${disable_nmi_watchdog}."
 echo "System setting POWER_AWARE_CPU_SCHEDULER_MODE=${power_aware_scheduler_mode}."
 echo "System setting ENABLE_VM_WRITEBACK_TIMEOUT_OPTIMIZATION=${enable_vm_writeback_timeout}."
 echo "System setting VM_DIRTY_WRITEBACK_CENTISECS=${vm_dirty_writeback_centisecs}."
+echo "System setting VFS_CACHE_PRESSURE=${vfs_cache_pressure}."
+echo "System setting VFS_CACHE_MAX_AGE=${vfs_cache_max_age}."
+echo "System setting ZFS_ARC_MIN_PERCENT=${zfs_arc_min_percent}."
+echo "System setting ZFS_ARC_MAX_PERCENT=${zfs_arc_max_percent}."
 
 write_value_with_status() {
     local path=$1
@@ -150,6 +196,46 @@ if [[ "$enable_vm_writeback_timeout" -eq 1 ]]; then
         "vm.dirty_writeback_centisecs path is not writable on this system."
 else
     echo "VM writeback timeout optimization disabled; no vm.dirty_writeback_centisecs changes applied."
+fi
+
+write_value_with_status \
+    /proc/sys/vm/vfs_cache_pressure \
+    "$vfs_cache_pressure" \
+    "vm.vfs_cache_pressure set to ${vfs_cache_pressure}." \
+    "Failed to set vm.vfs_cache_pressure to ${vfs_cache_pressure}." \
+    "vm.vfs_cache_pressure path is not writable on this system."
+
+write_value_with_status \
+    /proc/sys/vm/vfs_cache_max_age \
+    "$vfs_cache_max_age" \
+    "vm.vfs_cache_max_age set to ${vfs_cache_max_age}." \
+    "Failed to set vm.vfs_cache_max_age to ${vfs_cache_max_age}." \
+    "vm.vfs_cache_max_age path is not writable on this system."
+
+if [[ "$zfs_arc_min_percent" -eq 0 ]]; then
+    echo "ZFS ARC min percent is 0; keeping existing zfs_arc_min value."
+elif [[ "$system_memory_bytes" -gt 0 ]]; then
+    write_value_with_status \
+        /sys/module/zfs/parameters/zfs_arc_min \
+        "$zfs_arc_min_bytes" \
+        "zfs_arc_min set to ${zfs_arc_min_bytes} bytes (${zfs_arc_min_percent}% of RAM)." \
+        "Failed to set zfs_arc_min to ${zfs_arc_min_bytes} bytes (${zfs_arc_min_percent}% of RAM)." \
+        "zfs_arc_min path is not writable on this system."
+else
+    echo "Unable to read total system memory from /proc/meminfo; skipping zfs_arc_min tuning."
+fi
+
+if [[ "$zfs_arc_max_percent" -eq 0 ]]; then
+    echo "ZFS ARC max percent is 0; keeping existing zfs_arc_max value."
+elif [[ "$system_memory_bytes" -gt 0 ]]; then
+    write_value_with_status \
+        /sys/module/zfs/parameters/zfs_arc_max \
+        "$zfs_arc_max_bytes" \
+        "zfs_arc_max set to ${zfs_arc_max_bytes} bytes (${zfs_arc_max_percent}% of RAM)." \
+        "Failed to set zfs_arc_max to ${zfs_arc_max_bytes} bytes (${zfs_arc_max_percent}% of RAM)." \
+        "zfs_arc_max path is not writable on this system."
+else
+    echo "Unable to read total system memory from /proc/meminfo; skipping zfs_arc_max tuning."
 fi
 
 write_value_with_status \
