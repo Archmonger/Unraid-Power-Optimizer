@@ -10,11 +10,11 @@ Title="PCI Express"
     </p>
 
     <p>
-        Note that most systems will need to use the "Edit Syslinux" button below to force Unraid to be ASPM aware (then reboot).
+        If you experience crashing, you may need to use the "Edit Syslinux" button then reboot to force Unraid to allow ASPM.
     </p>
 
     <div markdown="1" class="notice warning">
-    "ASPM" and "OS-Controlled" power optimizations must be enabled in your BIOS prior to using these optimizations.
+    "ASPM" power optimizations must be enabled in your BIOS prior to running this script.
     </div>
 
     <div class="settings-grid">
@@ -36,8 +36,19 @@ Title="PCI Express"
         </label>
 
         <label>
-            <strong>Force ASPM on unsupported devices</strong><br>
-            <select id="force-aspm-mode">
+            <strong>Force ASPM on unsupported endpoints</strong><br>
+            <select id="force-aspm-endpoint-mode">
+                <option value="0" selected>disabled</option>
+                <option value="4">manual only</option>
+                <option value="1">L0</option>
+                <option value="2">L1</option>
+                <option value="3">L0 &amp; L1</option>
+            </select>
+        </label>
+
+        <label>
+            <strong>Force ASPM on unsupported bridges</strong><br>
+            <select id="force-aspm-bridge-mode">
                 <option value="0" selected>disabled</option>
                 <option value="4">manual only</option>
                 <option value="1">L0</option>
@@ -68,19 +79,19 @@ Title="PCI Express"
 
         <label class="toggle-option">
             <input type="checkbox" id="enable-l1ss-optimization">
-            Enable L1SS Optimization (requires motherboard compatibility)
+            Enable L1SS Optimization (requires strict compatibility)
         </label>
 
         <label class="toggle-option">
             <input type="checkbox" id="enable-pci-runtime-pm-optimization" checked>
-            Enable PCI Runtime PM Optimization
+            Enable PCI Runtime Power Management
         </label>
     </div>
 
     <div class="button-row">
         <button type="button" class="btn" id="save-settings">Save Settings</button>
         <button type="button" class="btn" id="run-optimize">Run Now</button>
-        <button type="button" class="btn" id="edit-syslinux-button">Edit Syslinux Configuration to Allow ASPM</button>
+        <button type="button" class="btn" id="edit-syslinux-button">Edit Syslinux</button>
     </div>
 
     <div id="syslinux-confirm-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="syslinux-confirm-title">
@@ -89,8 +100,8 @@ Title="PCI Express"
             <p>
                 This will update syslinux.cfg to append ASPM kernel parameters for supported Unraid boot labels.
             </p>
-            <p class="topology-note">
-                A reboot is required before kernel parameter changes take effect. If you fail to boot, you will need to boot into Unraid via "safe mode" to remove the syslinux edits.
+            <p class="topology-note" markdown="1">
+                A reboot is required before kernel parameter changes take effect. If you fail to boot, you will need to boot into Unraid via "safe mode" to remove the new settings from `/boot/syslinux/syslinux.cfg`.
             </p>
             <div class="modal-actions">
                 <button type="button" class="btn" id="syslinux-confirm-cancel">Cancel</button>
@@ -104,6 +115,10 @@ Title="PCI Express"
     <div id="automatic-panel" class="mode-panel">
         <label for="blacklist-input"><strong>BLACK_LIST (one pattern per line)</strong></label>
         <textarea id="blacklist-input" rows="8" spellcheck="false"></textarea>
+        <p class="topology-note">
+            Syntax note: one match pattern per line. Patterns are regular expressions used with Linux <code>bash</code> matching.
+            Examples: <code>NVIDIA</code>, <code>Ethernet|Network</code>, <code>^0000:01:</code>.
+        </p>
     </div>
 
     <div id="manual-panel" class="mode-panel hidden">
@@ -382,7 +397,8 @@ Title="PCI Express"
     const enableAspmOptimization = document.getElementById('enable-aspm-optimization');
     const enableClkpmOptimization = document.getElementById('enable-clkpm-optimization');
     const enableLtrOptimization = document.getElementById('enable-ltr-optimization');
-    const forceAspmMode = document.getElementById('force-aspm-mode');
+    const forceAspmEndpointMode = document.getElementById('force-aspm-endpoint-mode');
+    const forceAspmBridgeMode = document.getElementById('force-aspm-bridge-mode');
     const enableL1ssOptimization = document.getElementById('enable-l1ss-optimization');
     const enablePciRuntimePmOptimization = document.getElementById('enable-pci-runtime-pm-optimization');
     const blacklistInput = document.getElementById('blacklist-input');
@@ -594,7 +610,8 @@ Title="PCI Express"
             enableAspmOptimization,
             enableClkpmOptimization,
             enableLtrOptimization,
-            forceAspmMode,
+            forceAspmEndpointMode,
+            forceAspmBridgeMode,
             enableL1ssOptimization,
             enablePciRuntimePmOptimization,
             blacklistInput,
@@ -621,7 +638,8 @@ Title="PCI Express"
     }
 
     function getEligibleState(device) {
-        return device.aspm_supported || forceAspmMode.value === '4';
+        const forceMode = device.type === 'bridge' ? forceAspmBridgeMode.value : forceAspmEndpointMode.value;
+        return device.aspm_supported || forceMode === '4';
     }
 
     function orderDevicesByTopology(devices) {
@@ -708,7 +726,7 @@ Title="PCI Express"
             const depth = Number(device.depth || 0);
             const treePrefix = depth > 0 ? '|- ' : '* ';
             topologyCell.style.paddingLeft = (8 + depth * 18) + 'px';
-            topologyCell.textContent = treePrefix + (device.parent_id ? device.parent_id + ' -> ' : '') + device.id;
+            topologyCell.textContent = treePrefix + device.id;
 
             const idCell = document.createElement('td');
             idCell.textContent = device.id;
@@ -749,9 +767,11 @@ Title="PCI Express"
         enableAspmOptimization.checked = Number(settings.enable_aspm_optimization || 0) === 1;
         enableClkpmOptimization.checked = Number(settings.enable_clkpm_optimization || 0) === 1;
         enableLtrOptimization.checked = Number(settings.enable_ltr_optimization || 0) === 1;
-        forceAspmMode.value = String(settings.force_aspm_mode ?? (Number(settings.force_aspm ?? settings.manual_force_aspm ?? 0) === 1
+        const legacyForceAspmMode = settings.force_aspm_mode ?? (Number(settings.force_aspm ?? settings.manual_force_aspm ?? 0) === 1
             ? (settings.manual_target_aspm_mode || 3)
-            : 0));
+            : 0);
+        forceAspmEndpointMode.value = String(settings.force_aspm_endpoint_mode ?? legacyForceAspmMode);
+        forceAspmBridgeMode.value = String(settings.force_aspm_bridge_mode ?? legacyForceAspmMode);
         enableL1ssOptimization.checked = Number(settings.enable_l1ss_optimization || 0) === 1;
         enablePciRuntimePmOptimization.checked = Number(settings.enable_pci_runtime_pm_optimization ?? 1) === 1;
 
@@ -777,7 +797,8 @@ Title="PCI Express"
 
     async function loadDevices() {
         const data = await postAction('get_devices', {
-            force_aspm_mode: forceAspmMode.value
+            force_aspm_endpoint_mode: forceAspmEndpointMode.value,
+            force_aspm_bridge_mode: forceAspmBridgeMode.value
         });
 
         if (!data.ok) {
@@ -797,7 +818,8 @@ Title="PCI Express"
             enable_aspm_optimization: enableAspmOptimization.checked ? '1' : '0',
             enable_clkpm_optimization: enableClkpmOptimization.checked ? '1' : '0',
             enable_ltr_optimization: enableLtrOptimization.checked ? '1' : '0',
-            force_aspm_mode: forceAspmMode.value,
+            force_aspm_endpoint_mode: forceAspmEndpointMode.value,
+            force_aspm_bridge_mode: forceAspmBridgeMode.value,
             enable_l1ss_optimization: enableL1ssOptimization.checked ? '1' : '0',
             enable_pci_runtime_pm_optimization: enablePciRuntimePmOptimization.checked ? '1' : '0',
             manual_include_endpoints: manualIncludeEndpoints.checked ? '1' : '0',
@@ -831,7 +853,14 @@ Title="PCI Express"
         updateSaveButtonState();
     });
 
-    forceAspmMode.addEventListener('change', function () {
+    forceAspmEndpointMode.addEventListener('change', function () {
+        updateSaveButtonState();
+        loadDevices().catch(function (error) {
+            setStatus('Device refresh failed: ' + error.message, true);
+        });
+    });
+
+    forceAspmBridgeMode.addEventListener('change', function () {
         updateSaveButtonState();
         loadDevices().catch(function (error) {
             setStatus('Device refresh failed: ' + error.message, true);

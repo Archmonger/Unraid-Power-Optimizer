@@ -36,6 +36,8 @@ function default_settings(): array
         'ENABLE_L1SS_OPTIMIZATION' => '0',
         'ENABLE_PCI_RUNTIME_PM_OPTIMIZATION' => '1',
         'FORCE_ASPM_MODE' => '0',
+        'FORCE_ASPM_ENDPOINT_MODE' => '0',
+        'FORCE_ASPM_BRIDGE_MODE' => '0',
         'FORCE_ASPM' => '0',
         // Compatibility key retained for migration support with prior UI/script versions.
         'MANUAL_FORCE_ASPM' => '0',
@@ -759,12 +761,26 @@ function pcie_settings_from_raw(array $raw): array
     $manualSelectedDevices = normalize_csv_items((string)($raw['MANUAL_SELECTED_DEVICES'] ?? ''));
     $fallbackForceAspm = normalize_boolean($raw['FORCE_ASPM'] ?? ($raw['MANUAL_FORCE_ASPM'] ?? null), 0);
     $fallbackTargetMode = normalize_aspm_level($raw['MANUAL_TARGET_ASPM_MODE'] ?? 3, 3);
-    $forceAspmMode = normalize_force_aspm_mode(
+    $legacyForceAspmMode = normalize_force_aspm_mode(
         $raw['FORCE_ASPM_MODE'] ?? ($fallbackForceAspm === 1 ? $fallbackTargetMode : 0),
         0
     );
-    $forceAspm = $forceAspmMode === 0 ? 0 : 1;
-    $manualTargetMode = in_array($forceAspmMode, [1, 2, 3], true) ? $forceAspmMode : $fallbackTargetMode;
+    $forceAspmEndpointMode = normalize_force_aspm_mode(
+        $raw['FORCE_ASPM_ENDPOINT_MODE'] ?? $legacyForceAspmMode,
+        0
+    );
+    $forceAspmBridgeMode = normalize_force_aspm_mode(
+        $raw['FORCE_ASPM_BRIDGE_MODE'] ?? $legacyForceAspmMode,
+        0
+    );
+    $forceAspm = ($forceAspmEndpointMode !== 0 || $forceAspmBridgeMode !== 0) ? 1 : 0;
+    $manualTargetMode = $fallbackTargetMode;
+    if (
+        $forceAspmEndpointMode === $forceAspmBridgeMode
+        && in_array($forceAspmEndpointMode, [1, 2, 3], true)
+    ) {
+        $manualTargetMode = $forceAspmEndpointMode;
+    }
 
     return [
         'blacklist_csv' => $blacklistCsv,
@@ -776,7 +792,9 @@ function pcie_settings_from_raw(array $raw): array
         'enable_ltr_optimization' => normalize_boolean($raw['ENABLE_LTR_OPTIMIZATION'] ?? null, 1),
         'enable_l1ss_optimization' => normalize_boolean($raw['ENABLE_L1SS_OPTIMIZATION'] ?? null, 0),
         'enable_pci_runtime_pm_optimization' => normalize_boolean($raw['ENABLE_PCI_RUNTIME_PM_OPTIMIZATION'] ?? null, 1),
-        'force_aspm_mode' => $forceAspmMode,
+        'force_aspm_mode' => $legacyForceAspmMode,
+        'force_aspm_endpoint_mode' => $forceAspmEndpointMode,
+        'force_aspm_bridge_mode' => $forceAspmBridgeMode,
         'force_aspm' => $forceAspm,
         'manual_force_aspm' => $forceAspm,
         'manual_target_aspm_mode' => $manualTargetMode,
@@ -1043,7 +1061,7 @@ function aspm_support_label_from_mode(int $aspmMode): string
     }
 }
 
-function get_pci_devices(bool $forceAspm): array
+function get_pci_devices(bool $forceAspmEndpoints = false, bool $forceAspmBridges = false): array
 {
     $lines = [];
     $code = 1;
@@ -1080,6 +1098,8 @@ function get_pci_devices(bool $forceAspm): array
 
         $normalizedDeviceId = normalize_pci_device_id($device);
 
+        $forceAspmForType = $type === 'bridge' ? $forceAspmBridges : $forceAspmEndpoints;
+
         $devices[] = [
             'id' => $device,
             'description' => $description,
@@ -1087,7 +1107,7 @@ function get_pci_devices(bool $forceAspm): array
             'aspm_state' => $aspmState,
             'aspm_runtime' => $runtimeAspmMap[$normalizedDeviceId] ?? ($runtimeAspmMap[$device] ?? 'unknown'),
             'aspm_supported' => $aspmSupported,
-            'selectable' => $aspmSupported || $forceAspm,
+            'selectable' => $aspmSupported || $forceAspmForType,
             'parent_id' => get_parent_pci_device($device),
         ];
     }
@@ -1406,6 +1426,28 @@ if ($action === 'save_settings') {
         send_json(422, ['ok' => false, 'message' => 'BLACK_LIST cannot be empty. Add at least one pattern.']);
     }
 
+    $legacyForceAspmMode = normalize_force_aspm_mode(
+        $_POST['force_aspm_mode'] ?? (
+            normalize_boolean($_POST['force_aspm'] ?? ($_POST['manual_force_aspm'] ?? null), 0) === 1
+                ? ($_POST['manual_target_aspm_mode'] ?? 3)
+                : 0
+        ),
+        0
+    );
+
+    $forceAspmEndpointMode = normalize_force_aspm_mode(
+        $_POST['force_aspm_endpoint_mode'] ?? $legacyForceAspmMode,
+        0
+    );
+    $forceAspmBridgeMode = normalize_force_aspm_mode(
+        $_POST['force_aspm_bridge_mode'] ?? $legacyForceAspmMode,
+        0
+    );
+
+    $compatForceAspmMode = $forceAspmEndpointMode === $forceAspmBridgeMode
+        ? (string)$forceAspmEndpointMode
+        : '0';
+
     $updates = [
         'BLACK_LIST' => implode(',', $blacklistItems),
         'AUTO_EXECUTE_ON_STARTUP' => (string)normalize_boolean($_POST['auto_execute_on_startup'] ?? null, 0),
@@ -1416,14 +1458,9 @@ if ($action === 'save_settings') {
         'ENABLE_LTR_OPTIMIZATION' => (string)normalize_boolean($_POST['enable_ltr_optimization'] ?? null, 1),
         'ENABLE_L1SS_OPTIMIZATION' => (string)normalize_boolean($_POST['enable_l1ss_optimization'] ?? null, 0),
         'ENABLE_PCI_RUNTIME_PM_OPTIMIZATION' => (string)normalize_boolean($_POST['enable_pci_runtime_pm_optimization'] ?? null, 1),
-        'FORCE_ASPM_MODE' => (string)normalize_force_aspm_mode(
-            $_POST['force_aspm_mode'] ?? (
-                normalize_boolean($_POST['force_aspm'] ?? ($_POST['manual_force_aspm'] ?? null), 0) === 1
-                    ? ($_POST['manual_target_aspm_mode'] ?? 3)
-                    : 0
-            ),
-            0
-        ),
+        'FORCE_ASPM_MODE' => $compatForceAspmMode,
+        'FORCE_ASPM_ENDPOINT_MODE' => (string)$forceAspmEndpointMode,
+        'FORCE_ASPM_BRIDGE_MODE' => (string)$forceAspmBridgeMode,
         'FORCE_ASPM' => '0',
         'MANUAL_FORCE_ASPM' => '0',
         'MANUAL_TARGET_ASPM_MODE' => '3',
@@ -1432,12 +1469,19 @@ if ($action === 'save_settings') {
         'MANUAL_SELECTED_DEVICES' => implode(',', normalize_csv_items((string)($_POST['manual_selected_devices'] ?? ''))),
     ];
 
-    $forceAspmEnabled = $updates['FORCE_ASPM_MODE'] !== '0';
+    $forceAspmEnabled = $forceAspmEndpointMode !== 0 || $forceAspmBridgeMode !== 0;
     $updates['FORCE_ASPM'] = $forceAspmEnabled ? '1' : '0';
     $updates['MANUAL_FORCE_ASPM'] = $forceAspmEnabled ? '1' : '0';
-    $updates['MANUAL_TARGET_ASPM_MODE'] = !$forceAspmEnabled
-        ? '3'
-        : ($updates['FORCE_ASPM_MODE'] === '4' ? $updates['MAX_ASPM_LEVEL'] : $updates['FORCE_ASPM_MODE']);
+    if (!$forceAspmEnabled) {
+        $updates['MANUAL_TARGET_ASPM_MODE'] = '3';
+    } elseif (
+        $forceAspmEndpointMode === $forceAspmBridgeMode
+        && in_array($forceAspmEndpointMode, [1, 2, 3], true)
+    ) {
+        $updates['MANUAL_TARGET_ASPM_MODE'] = (string)$forceAspmEndpointMode;
+    } else {
+        $updates['MANUAL_TARGET_ASPM_MODE'] = $updates['MAX_ASPM_LEVEL'];
+    }
 
     if (
         $updates['OPERATION_MODE'] === 'manual'
@@ -1465,7 +1509,7 @@ if ($action === 'save_settings') {
 
 if ($action === 'get_devices') {
     $pcie = pcie_settings_from_raw($rawSettings);
-    $forceAspmMode = normalize_force_aspm_mode(
+    $legacyForceAspmMode = normalize_force_aspm_mode(
         $_POST['force_aspm_mode']
             ?? ($_GET['force_aspm_mode']
                 ?? (
@@ -1479,13 +1523,24 @@ if ($action === 'get_devices') {
                         ? ($_POST['manual_target_aspm_mode'] ?? ($_GET['manual_target_aspm_mode'] ?? 3))
                         : null
                 )),
-        (int)$pcie['force_aspm_mode']
+        (int)($pcie['force_aspm_mode'] ?? 0)
     );
-    $forceAspm = $forceAspmMode === 4;
+
+    $forceAspmEndpointMode = normalize_force_aspm_mode(
+        $_POST['force_aspm_endpoint_mode']
+            ?? ($_GET['force_aspm_endpoint_mode'] ?? $legacyForceAspmMode),
+        (int)($pcie['force_aspm_endpoint_mode'] ?? 0)
+    );
+
+    $forceAspmBridgeMode = normalize_force_aspm_mode(
+        $_POST['force_aspm_bridge_mode']
+            ?? ($_GET['force_aspm_bridge_mode'] ?? $legacyForceAspmMode),
+        (int)($pcie['force_aspm_bridge_mode'] ?? 0)
+    );
 
     send_json(200, [
         'ok' => true,
-        'devices' => get_pci_devices($forceAspm),
+        'devices' => get_pci_devices($forceAspmEndpointMode === 4, $forceAspmBridgeMode === 4),
     ]);
 }
 

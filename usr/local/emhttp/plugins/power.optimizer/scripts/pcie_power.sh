@@ -38,6 +38,10 @@ DEFAULT_ENABLE_PCI_RUNTIME_PM_OPTIMIZATION=0
 ENABLE_PCI_RUNTIME_PM_OPTIMIZATION=$DEFAULT_ENABLE_PCI_RUNTIME_PM_OPTIMIZATION
 DEFAULT_FORCE_ASPM_MODE=0
 FORCE_ASPM_MODE=$DEFAULT_FORCE_ASPM_MODE
+DEFAULT_FORCE_ASPM_ENDPOINT_MODE=0
+FORCE_ASPM_ENDPOINT_MODE=$DEFAULT_FORCE_ASPM_ENDPOINT_MODE
+DEFAULT_FORCE_ASPM_BRIDGE_MODE=0
+FORCE_ASPM_BRIDGE_MODE=$DEFAULT_FORCE_ASPM_BRIDGE_MODE
 DEFAULT_FORCE_ASPM=0
 FORCE_ASPM=$DEFAULT_FORCE_ASPM
 DEFAULT_MANUAL_TARGET_ASPM_MODE=3
@@ -217,6 +221,8 @@ ensure_config_file() {
             printf 'ENABLE_L1SS_OPTIMIZATION="%s"\n' "$DEFAULT_ENABLE_L1SS_OPTIMIZATION"
             printf 'ENABLE_PCI_RUNTIME_PM_OPTIMIZATION="%s"\n' "$DEFAULT_ENABLE_PCI_RUNTIME_PM_OPTIMIZATION"
             printf 'FORCE_ASPM_MODE="%s"\n' "$DEFAULT_FORCE_ASPM_MODE"
+            printf 'FORCE_ASPM_ENDPOINT_MODE="%s"\n' "$DEFAULT_FORCE_ASPM_ENDPOINT_MODE"
+            printf 'FORCE_ASPM_BRIDGE_MODE="%s"\n' "$DEFAULT_FORCE_ASPM_BRIDGE_MODE"
             printf 'FORCE_ASPM="%s"\n' "$DEFAULT_FORCE_ASPM"
             printf 'MANUAL_FORCE_ASPM="%s"\n' "$DEFAULT_FORCE_ASPM"
             printf 'MANUAL_TARGET_ASPM_MODE="%s"\n' "$DEFAULT_MANUAL_TARGET_ASPM_MODE"
@@ -235,6 +241,8 @@ ensure_config_file() {
         grep -q '^ENABLE_L1SS_OPTIMIZATION=' "$PLUGIN_CONFIG_FILE" || printf 'ENABLE_L1SS_OPTIMIZATION="%s"\n' "$DEFAULT_ENABLE_L1SS_OPTIMIZATION" >> "$PLUGIN_CONFIG_FILE"
         grep -q '^ENABLE_PCI_RUNTIME_PM_OPTIMIZATION=' "$PLUGIN_CONFIG_FILE" || printf 'ENABLE_PCI_RUNTIME_PM_OPTIMIZATION="%s"\n' "$DEFAULT_ENABLE_PCI_RUNTIME_PM_OPTIMIZATION" >> "$PLUGIN_CONFIG_FILE"
         grep -q '^FORCE_ASPM_MODE=' "$PLUGIN_CONFIG_FILE" || printf 'FORCE_ASPM_MODE="%s"\n' "$DEFAULT_FORCE_ASPM_MODE" >> "$PLUGIN_CONFIG_FILE"
+        grep -q '^FORCE_ASPM_ENDPOINT_MODE=' "$PLUGIN_CONFIG_FILE" || printf 'FORCE_ASPM_ENDPOINT_MODE="%s"\n' "$DEFAULT_FORCE_ASPM_ENDPOINT_MODE" >> "$PLUGIN_CONFIG_FILE"
+        grep -q '^FORCE_ASPM_BRIDGE_MODE=' "$PLUGIN_CONFIG_FILE" || printf 'FORCE_ASPM_BRIDGE_MODE="%s"\n' "$DEFAULT_FORCE_ASPM_BRIDGE_MODE" >> "$PLUGIN_CONFIG_FILE"
         grep -q '^FORCE_ASPM=' "$PLUGIN_CONFIG_FILE" || printf 'FORCE_ASPM="%s"\n' "$DEFAULT_FORCE_ASPM" >> "$PLUGIN_CONFIG_FILE"
         grep -q '^MANUAL_FORCE_ASPM=' "$PLUGIN_CONFIG_FILE" || printf 'MANUAL_FORCE_ASPM="%s"\n' "$DEFAULT_FORCE_ASPM" >> "$PLUGIN_CONFIG_FILE"
         grep -q '^MANUAL_TARGET_ASPM_MODE=' "$PLUGIN_CONFIG_FILE" || printf 'MANUAL_TARGET_ASPM_MODE="%s"\n' "$DEFAULT_MANUAL_TARGET_ASPM_MODE" >> "$PLUGIN_CONFIG_FILE"
@@ -249,6 +257,7 @@ ensure_config_file() {
 load_settings_from_config() {
     local raw_line raw_value
     local parsed entry raw_auto raw_mode raw_force raw_force_mode raw_target
+    local raw_force_endpoint_mode raw_force_bridge_mode
     local raw_max_aspm raw_enable_aspm raw_enable_clkpm raw_enable_ltr raw_enable_l1ss
     local raw_enable_pci_runtime_pm
     local raw_manual_endpoints raw_manual_bridges raw_manual_devices
@@ -303,8 +312,13 @@ load_settings_from_config() {
     raw_force=$(read_config_value "FORCE_ASPM" "$(read_config_value "MANUAL_FORCE_ASPM" "$DEFAULT_FORCE_ASPM")")
     raw_target=$(read_config_value "MANUAL_TARGET_ASPM_MODE" "$DEFAULT_MANUAL_TARGET_ASPM_MODE")
     raw_force_mode=$(read_config_value "FORCE_ASPM_MODE" "$(if [[ "$(bool_from_string "$raw_force")" -eq 1 ]]; then echo "$raw_target"; else echo "$DEFAULT_FORCE_ASPM_MODE"; fi)")
+    raw_force_endpoint_mode=$(read_config_value "FORCE_ASPM_ENDPOINT_MODE" "$raw_force_mode")
+    raw_force_bridge_mode=$(read_config_value "FORCE_ASPM_BRIDGE_MODE" "$raw_force_mode")
+
     FORCE_ASPM_MODE=$(force_aspm_mode_from_string "$raw_force_mode" "$DEFAULT_FORCE_ASPM_MODE")
-    FORCE_ASPM=$([[ "$FORCE_ASPM_MODE" -eq 0 ]] && echo 0 || echo 1)
+    FORCE_ASPM_ENDPOINT_MODE=$(force_aspm_mode_from_string "$raw_force_endpoint_mode" "$FORCE_ASPM_MODE")
+    FORCE_ASPM_BRIDGE_MODE=$(force_aspm_mode_from_string "$raw_force_bridge_mode" "$FORCE_ASPM_MODE")
+    FORCE_ASPM=$([[ "$FORCE_ASPM_ENDPOINT_MODE" -eq 0 && "$FORCE_ASPM_BRIDGE_MODE" -eq 0 ]] && echo 0 || echo 1)
 
     MANUAL_TARGET_ASPM_MODE=$(aspm_mode_from_string "$raw_target" "$DEFAULT_MANUAL_TARGET_ASPM_MODE")
 
@@ -540,7 +554,15 @@ show_usage() {
 
 resolve_target_mode_for_device() {
     local dev=$1
+    local scope=${2:-endpoint}
     local mode_status
+    local force_mode
+
+    if [[ "$scope" == "bridge" ]]; then
+        force_mode=$FORCE_ASPM_BRIDGE_MODE
+    else
+        force_mode=$FORCE_ASPM_ENDPOINT_MODE
+    fi
 
     detect_link_power_capabilities "$dev"
     mode_status=$?
@@ -550,7 +572,7 @@ resolve_target_mode_for_device() {
         return 0
     fi
 
-    if [[ ( "$mode_status" -eq 2 || "$mode_status" -eq 3 ) && "$FORCE_ASPM_MODE" -eq 4 ]]; then
+    if [[ ( "$mode_status" -eq 2 || "$mode_status" -eq 3 ) && "$force_mode" -eq 4 ]]; then
         if [[ "$OPERATION_MODE" != "manual" ]]; then
             return "$mode_status"
         fi
@@ -561,8 +583,8 @@ resolve_target_mode_for_device() {
         return 0
     fi
 
-    if [[ "$FORCE_ASPM_MODE" -ne 0 && ( "$mode_status" -eq 2 || "$mode_status" -eq 3 ) ]]; then
-        ASPM_TARGET_MODE=$FORCE_ASPM_MODE
+    if [[ "$force_mode" -ne 0 && ( "$mode_status" -eq 2 || "$mode_status" -eq 3 ) ]]; then
+        ASPM_TARGET_MODE=$force_mode
         CLKPM_SUPPORTED=0
         ASPM_TARGET_MODE=$(clamp_aspm_mode_by_max "$ASPM_TARGET_MODE")
         return 0
@@ -1128,7 +1150,8 @@ run_auto_optimize() {
     echo "Operation Mode: ${OPERATION_MODE}"
     echo "Auto Execute on Startup: ${AUTO_EXECUTE_ON_STARTUP}"
     echo "Optimization Toggles: aspm=${ENABLE_ASPM} clkpm=${ENABLE_CLKPM} ltr=${ENABLE_LTR} l1ss=${ENABLE_L1SS} pci_runtime_pm=${ENABLE_PCI_RUNTIME_PM} max_aspm=$(aspm_mode_label "$MAX_ASPM_LEVEL")"
-    echo "Force ASPM mode on unsupported devices: $(aspm_mode_label "$FORCE_ASPM_MODE")"
+    echo "Force ASPM mode on unsupported endpoints: $(aspm_mode_label "$FORCE_ASPM_ENDPOINT_MODE")"
+    echo "Force ASPM mode on unsupported bridges: $(aspm_mode_label "$FORCE_ASPM_BRIDGE_MODE")"
     if [[ "$OPERATION_MODE" == "manual" ]]; then
         echo "Manual Settings: include_endpoints=${MANUAL_INCLUDE_ENDPOINTS} include_bridges=${MANUAL_INCLUDE_BRIDGES} selected_devices=${#MANUAL_SELECTED_DEVICES[@]}"
     fi
@@ -1151,7 +1174,7 @@ run_auto_optimize() {
 
         record_action "Inspect endpoint ${dev}" "detect_link_power_capabilities ${dev}"
 
-        resolve_target_mode_for_device "$dev"
+        resolve_target_mode_for_device "$dev" "endpoint"
         mode_status=$?
         case "$mode_status" in
             2)
@@ -1279,7 +1302,7 @@ run_auto_optimize() {
 
         record_action "Inspect bridge ${dev}" "detect_link_power_capabilities ${dev}"
 
-        resolve_target_mode_for_device "$dev"
+        resolve_target_mode_for_device "$dev" "bridge"
         mode_status=$?
         case "$mode_status" in
             2)
