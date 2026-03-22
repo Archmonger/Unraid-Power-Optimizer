@@ -74,6 +74,10 @@ Title="System Tunables"
         <button type="button" class="btn" id="system-run-button">Run Now</button>
     </div>
 
+    <br>
+    <hr>
+    <br>
+
     <div id="system-status-message" class="status-message" aria-live="polite">[--:--:--] Ready.</div>
     <pre id="system-status" class="terminal-box">$ waiting for optimizer output...</pre>
 </div>

@@ -19,11 +19,35 @@ requested=0
 skipped=0
 failed=0
 
+find_disk_name_for_device() {
+    local short_dev=$1
+
+    awk -v target="$short_dev" '
+        /^name="/ {
+            current_name = $0
+            sub(/^name="/, "", current_name)
+            sub(/"$/, "", current_name)
+            next
+        }
+
+        /^device="/ {
+            current_device = $0
+            sub(/^device="/, "", current_device)
+            sub(/"$/, "", current_device)
+
+            if (current_device == target && current_name != "") {
+                print current_name
+                exit
+            }
+        }
+    ' /var/local/emhttp/disks.ini
+}
+
 shopt -s nullglob
 for dev in /dev/sd?; do
     short_dev="${dev##*/}"
 
-    disk_name=$(grep -zoP "(?<=name=\")[a-z0-9]+(?=\"\ndevice=\"${short_dev})" /var/local/emhttp/disks.ini | tr -d '\0' | head -n 1)
+    disk_name=$(find_disk_name_for_device "$short_dev")
 
     if [[ -z "$disk_name" ]]; then
         echo "Skipping ${dev}: no matching disk name found in disks.ini."

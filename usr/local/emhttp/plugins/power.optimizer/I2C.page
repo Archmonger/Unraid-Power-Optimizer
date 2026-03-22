@@ -30,6 +30,10 @@ Title="I2C"
         <button type="button" class="btn" id="i2c-run-button">Run Now</button>
     </div>
 
+    <br>
+    <hr>
+    <br>
+
     <div id="i2c-status-message" class="status-message" aria-live="polite">[--:--:--] Ready.</div>
     <pre id="i2c-status" class="terminal-box">$ waiting for optimizer output...</pre>
 </div>

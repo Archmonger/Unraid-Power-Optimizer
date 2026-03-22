@@ -41,6 +41,10 @@ Title="Disks"
         <button type="button" class="btn" id="disks-spin-down-all-button">Spin Down All Drives</button>
     </div>
 
+    <br>
+    <hr>
+    <br>
+
     <div id="disks-status-message" class="status-message" aria-live="polite">[--:--:--] Ready.</div>
     <pre id="disks-status" class="terminal-box">$ waiting for optimizer output...</pre>
 </div>
@@ -289,10 +293,7 @@ Title="Disks"
         state.ataRuntimePmTargets = normalizeRuntimeTargets(caps.ata_runtime_pm_targets);
 
         autoStartupToggle.checked = Number(settings.auto_execute_on_startup || 0) === 1;
-        const legacySataMode = Number(settings.enable_sata_lpm_optimization || 0) === 1
-            ? (settings.sata_lpm_policy || 'min_power')
-            : 'disabled';
-        sataLpmMode.value = settings.sata_lpm_mode || legacySataMode;
+        sataLpmMode.value = settings.sata_lpm_mode || 'min_power';
 
         populateRuntimePmSelect(
             diskRuntimePmMode,

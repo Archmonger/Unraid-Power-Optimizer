@@ -57,6 +57,24 @@ turbo_mode_from_string() {
     esac
 }
 
+write_sysfs_value() {
+    local path=$1
+    local value=$2
+    local label=$3
+
+    if [[ ! -f "$path" ]]; then
+        return 0
+    fi
+
+    if echo "$value" > "$path" 2>/dev/null; then
+        echo "${label} set to ${value}."
+        return 0
+    fi
+
+    echo "Failed to set ${label} to ${value} at ${path}."
+    return 1
+}
+
 governor_mode=$(governor_mode_from_string "$(read_config_value "CPU_GOVERNOR_MODE" "powersave")")
 turbo_mode=$(turbo_mode_from_string "$(read_config_value "CPU_TURBO_MODE" "disabled")")
 cpu_auto_startup=$(bool_from_string "$(read_config_value "CPU_AUTO_EXECUTE_ON_STARTUP" "0")")
@@ -74,23 +92,13 @@ fi
 
 if [[ "$turbo_mode" != "disabled" ]]; then
     if [[ "$turbo_mode" == "force_enabled" ]]; then
-        if [[ -f /sys/devices/system/cpu/intel_pstate/no_turbo ]]; then
-            echo "0" > /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || true
-        fi
-
-        if [[ -f /sys/devices/system/cpu/cpufreq/boost ]]; then
-            echo "1" > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true
-        fi
+        write_sysfs_value "/sys/devices/system/cpu/intel_pstate/no_turbo" "0" "intel_pstate no_turbo"
+        write_sysfs_value "/sys/devices/system/cpu/cpufreq/boost" "1" "cpufreq boost"
     fi
 
     if [[ "$turbo_mode" == "force_disabled" ]]; then
-        if [[ -f /sys/devices/system/cpu/intel_pstate/no_turbo ]]; then
-            echo "1" > /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || true
-        fi
-
-        if [[ -f /sys/devices/system/cpu/cpufreq/boost ]]; then
-            echo "0" > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true
-        fi
+        write_sysfs_value "/sys/devices/system/cpu/intel_pstate/no_turbo" "1" "intel_pstate no_turbo"
+        write_sysfs_value "/sys/devices/system/cpu/cpufreq/boost" "0" "cpufreq boost"
     fi
 
     echo "CPU turbo state updated (mode=${turbo_mode})."

@@ -40,13 +40,6 @@ bool_from_string() {
     esac
 }
 
-runtime_target_from_string() {
-    case "${1,,}" in
-        on) echo "on" ;;
-        *) echo "auto" ;;
-    esac
-}
-
 runtime_pm_mode_from_string() {
     case "${1,,}" in
         disabled|off) echo "disabled" ;;
@@ -55,15 +48,7 @@ runtime_pm_mode_from_string() {
     esac
 }
 
-legacy_enable_i2c_pm=$(bool_from_string "$(read_config_value "ENABLE_I2C_RUNTIME_PM_OPTIMIZATION" "1")")
-legacy_target=$(runtime_target_from_string "$(read_config_value "I2C_RUNTIME_PM_TARGET" "on")")
-
-legacy_mode="disabled"
-if [[ "$legacy_enable_i2c_pm" -eq 1 ]]; then
-    legacy_mode="$legacy_target"
-fi
-
-mode=$(runtime_pm_mode_from_string "$(read_config_value "I2C_RUNTIME_PM_MODE" "$legacy_mode")")
+mode=$(runtime_pm_mode_from_string "$(read_config_value "I2C_RUNTIME_PM_MODE" "on")")
 device_glob=$(read_config_value "I2C_DEVICE_GLOB" "i2c-*")
 [[ -n "$device_glob" ]] || device_glob="i2c-*"
 i2c_auto_startup=$(bool_from_string "$(read_config_value "I2C_AUTO_EXECUTE_ON_STARTUP" "0")")

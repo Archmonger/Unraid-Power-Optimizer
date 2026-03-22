@@ -42,7 +42,8 @@ bool_from_string() {
 
 runtime_target_from_string() {
     case "${1,,}" in
-        disabled|off|on) echo "disabled" ;;
+        disabled|off) echo "disabled" ;;
+        on|auto) echo "auto" ;;
         *) echo "auto" ;;
     esac
 }

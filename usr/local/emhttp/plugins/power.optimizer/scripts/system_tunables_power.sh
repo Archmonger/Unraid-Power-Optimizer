@@ -99,22 +99,10 @@ audio_codec_power_save_seconds=$(int_in_range "$(read_config_value "AUDIO_CODEC_
 enable_nmi_watchdog=$(bool_from_string "$(read_config_value "ENABLE_NMI_WATCHDOG_OPTIMIZATION" "1")")
 nmi_watchdog_target=$(int_in_range "$(read_config_value "NMI_WATCHDOG_TARGET" "0")" 0 0 1)
 
-legacy_enable_power_aware_scheduler=$(bool_from_string "$(read_config_value "ENABLE_POWER_AWARE_CPU_SCHEDULER_OPTIMIZATION" "1")")
-legacy_power_aware_scheduler_target=$(int_in_range "$(read_config_value "POWER_AWARE_CPU_SCHEDULER_TARGET" "2")" 2 0 2)
-
-if [[ -n "$(read_config_value "POWER_AWARE_CPU_SCHEDULER_MODE" "")" ]]; then
-    power_aware_scheduler_mode=$(int_in_range "$(read_config_value "POWER_AWARE_CPU_SCHEDULER_MODE" "2")" 2 0 2)
-else
-    if [[ "$legacy_enable_power_aware_scheduler" -eq 1 ]]; then
-        power_aware_scheduler_mode="$legacy_power_aware_scheduler_target"
-    else
-        power_aware_scheduler_mode=0
-    fi
-fi
+power_aware_scheduler_mode=$(int_in_range "$(read_config_value "POWER_AWARE_CPU_SCHEDULER_MODE" "2")" 2 0 2)
 
 enable_vm_writeback_timeout=$(bool_from_string "$(read_config_value "ENABLE_VM_WRITEBACK_TIMEOUT_OPTIMIZATION" "1")")
-legacy_vm_writeback_centisecs=$(int_in_range "$(read_config_value "VM_WRITEBACK_TIMEOUT_CENTISECS" "1500")" 1500 100 60000)
-vm_dirty_writeback_centisecs=$(int_in_range "$(read_config_value "VM_DIRTY_WRITEBACK_CENTISECS" "$legacy_vm_writeback_centisecs")" 1500 100 60000)
+vm_dirty_writeback_centisecs=$(int_in_range "$(read_config_value "VM_DIRTY_WRITEBACK_CENTISECS" "1500")" 1500 100 60000)
 vfs_cache_pressure=$(int_in_range "$(read_config_value "VFS_CACHE_PRESSURE" "1")" 1 1 10000)
 vfs_cache_max_age=$(int_in_range "$(read_config_value "VFS_CACHE_MAX_AGE" "60000")" 60000 1 31536000)
 zfs_arc_min_percent=$(int_in_range "$(read_config_value "ZFS_ARC_MIN_PERCENT" "10")" 10 0 100)

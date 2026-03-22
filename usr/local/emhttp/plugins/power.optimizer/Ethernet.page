@@ -30,6 +30,10 @@ Title="Ethernet"
         <button type="button" class="btn" id="ethernet-run-button">Run Now</button>
     </div>
 
+    <br>
+    <hr>
+    <br>
+
     <div id="ethernet-status-message" class="status-message" aria-live="polite">[--:--:--] Ready.</div>
     <pre id="ethernet-status" class="terminal-box">$ waiting for optimizer output...</pre>
 </div>

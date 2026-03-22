@@ -54,6 +54,10 @@ Title="CPU"
         </div>
     </div>
 
+    <br>
+    <hr>
+    <br>
+
     <div id="cpu-status-message" class="status-message" aria-live="polite">[--:--:--] Ready.</div>
     <pre id="cpu-status" class="terminal-box">$ waiting for optimizer output...</pre>
 </div>

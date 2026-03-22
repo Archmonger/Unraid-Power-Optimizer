@@ -43,16 +43,7 @@ bool_from_string() {
 runtime_pm_mode_from_string() {
     case "${1,,}" in
         disabled|off) echo "disabled" ;;
-        on) echo "auto" ;;
         *) echo "auto" ;;
-    esac
-}
-
-sata_policy_from_string() {
-    case "${1,,}" in
-        max_performance|max) echo "max_performance" ;;
-        min_power|min) echo "min_power" ;;
-        *) echo "med_power_with_dipm" ;;
     esac
 }
 
@@ -65,34 +56,11 @@ sata_lpm_mode_from_string() {
     esac
 }
 
-legacy_enable_sata=$(bool_from_string "$(read_config_value "ENABLE_SATA_LPM_OPTIMIZATION" "1")")
-legacy_sata_policy=$(sata_policy_from_string "$(read_config_value "SATA_LPM_POLICY" "min_power")")
-
-legacy_sata_mode="disabled"
-if [[ "$legacy_enable_sata" -eq 1 ]]; then
-    legacy_sata_mode="$legacy_sata_policy"
-fi
-
-sata_mode=$(sata_lpm_mode_from_string "$(read_config_value "SATA_LPM_MODE" "$legacy_sata_mode")")
+sata_mode=$(sata_lpm_mode_from_string "$(read_config_value "SATA_LPM_MODE" "min_power")")
 disks_auto_startup=$(bool_from_string "$(read_config_value "DISKS_AUTO_EXECUTE_ON_STARTUP" "0")")
 
-legacy_enable_disk_pm=$(bool_from_string "$(read_config_value "ENABLE_DISK_RUNTIME_PM_OPTIMIZATION" "1")")
-legacy_enable_ata_pm=$(bool_from_string "$(read_config_value "ENABLE_ATA_RUNTIME_PM_OPTIMIZATION" "1")")
-legacy_disk_target=$(runtime_pm_mode_from_string "$(read_config_value "DISK_RUNTIME_PM_TARGET" "auto")")
-legacy_ata_target=$(runtime_pm_mode_from_string "$(read_config_value "ATA_RUNTIME_PM_TARGET" "auto")")
-
-legacy_disk_mode="disabled"
-if [[ "$legacy_enable_disk_pm" -eq 1 ]]; then
-    legacy_disk_mode="$legacy_disk_target"
-fi
-
-legacy_ata_mode="disabled"
-if [[ "$legacy_enable_ata_pm" -eq 1 ]]; then
-    legacy_ata_mode="$legacy_ata_target"
-fi
-
-disk_mode=$(runtime_pm_mode_from_string "$(read_config_value "DISK_RUNTIME_PM_MODE" "$legacy_disk_mode")")
-ata_mode=$(runtime_pm_mode_from_string "$(read_config_value "ATA_RUNTIME_PM_MODE" "$legacy_ata_mode")")
+disk_mode=$(runtime_pm_mode_from_string "$(read_config_value "DISK_RUNTIME_PM_MODE" "auto")")
+ata_mode=$(runtime_pm_mode_from_string "$(read_config_value "ATA_RUNTIME_PM_MODE" "auto")")
 
 echo "Disks setting DISKS_AUTO_EXECUTE_ON_STARTUP=${disks_auto_startup}."
 echo "Disks setting SATA_LPM_MODE=${sata_mode}."

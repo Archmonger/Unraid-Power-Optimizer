@@ -1,6 +1,6 @@
 #!/bin/bash
 
-DOCROOT=$(grep -Po '^chdir = \K.*' /etc/php-fpm.d/www.conf 2>/dev/null)
+DOCROOT=$(awk -F'=' '/^[[:space:]]*chdir[[:space:]]*=/{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit}' /etc/php-fpm.d/www.conf 2>/dev/null)
 if [[ -z "$DOCROOT" ]]; then
     DOCROOT="/usr/local/emhttp"
 fi

@@ -111,7 +111,7 @@ Title="PCI Express"
     <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
     <div id="automatic-panel" class="mode-panel">
-        <label for="blacklist-input"><strong>BLACK LIST</strong></label>
+        <label for="blacklist-input"><strong>Black List</strong></label>
         
         <p class="topology-note">
             One match pattern per line. Patterns are regular expressions used with Linux <code>bash</code> matching.
@@ -166,6 +166,10 @@ Title="PCI Express"
         </div>
 
     </div>
+
+    <br>
+    <hr>
+    <br>
 
     <div id="optimizer-status-message" class="status-message" aria-live="polite">[--:--:--] Ready.</div>
     <pre id="optimizer-status" class="terminal-box">$ waiting for optimizer output...</pre>

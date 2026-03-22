@@ -50,7 +50,7 @@ auto_eth_interfaces() {
 }
 
 enable_eee=$(bool_from_string "$(read_config_value "ENABLE_ETHERNET_EEE_OPTIMIZATION" "1")")
-enable_wol=$(bool_from_string "$(read_config_value "ENABLE_ETHERNET_WOL_OPTIMIZATION" "$(read_config_value "ENABLE_WOL_OPTIMIZATION" "1")")")
+enable_wol=$(bool_from_string "$(read_config_value "ENABLE_ETHERNET_WOL_OPTIMIZATION" "1")")
 ethernet_auto_startup=$(bool_from_string "$(read_config_value "ETHERNET_AUTO_EXECUTE_ON_STARTUP" "0")")
 auto_eth_interfaces
 

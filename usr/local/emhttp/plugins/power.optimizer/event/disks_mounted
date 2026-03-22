@@ -5,6 +5,8 @@ CONFIG_FILE="/boot/config/plugins/${PLUGIN_NAME}/settings.cfg"
 LOG_DIR="/boot/logs"
 STATE_DIR="/var/run/${PLUGIN_NAME}"
 LOCK_DIR="${STATE_DIR}/startup.lock"
+LOCK_INFO_FILE="${LOCK_DIR}/info"
+LOCK_STALE_SECONDS=900
 LAST_RUN_FILE="${STATE_DIR}/startup.last"
 RUN_DEDUP_SECONDS=120
 EVENT_SOURCE="${POWER_OPTIMIZER_EVENT_SOURCE:-disks_mounted}"
@@ -70,14 +72,63 @@ run_startup_script() {
     nohup /bin/bash "$script_path" "${args[@]}" >> "$log_file" 2>&1 &
 }
 
+write_lock_info() {
+    {
+        printf 'pid=%s\n' "$$"
+        printf 'started=%s\n' "$(date +%s)"
+        printf 'source=%s\n' "$EVENT_SOURCE"
+    } > "$LOCK_INFO_FILE" 2>/dev/null || true
+}
+
+acquire_startup_lock() {
+    local lock_pid lock_started now age
+
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+        write_lock_info
+        return 0
+    fi
+
+    if [[ ! -r "$LOCK_INFO_FILE" ]]; then
+        return 1
+    fi
+
+    lock_pid=$(grep -E '^pid=' "$LOCK_INFO_FILE" | tail -n 1 | cut -d= -f2)
+    lock_started=$(grep -E '^started=' "$LOCK_INFO_FILE" | tail -n 1 | cut -d= -f2)
+
+    if [[ "$lock_pid" =~ ^[0-9]+$ ]] && kill -0 "$lock_pid" 2>/dev/null; then
+        return 1
+    fi
+
+    now=$(date +%s)
+    if [[ "$lock_started" =~ ^[0-9]+$ ]]; then
+        age=$(( now - lock_started ))
+    else
+        age=$LOCK_STALE_SECONDS
+    fi
+
+    if (( age < LOCK_STALE_SECONDS )); then
+        return 1
+    fi
+
+    logger -t "$PLUGIN_NAME" "Startup hook removing stale lock (source=${EVENT_SOURCE}, stale_seconds=${age})."
+    rm -rf "$LOCK_DIR" 2>/dev/null || true
+
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+        write_lock_info
+        return 0
+    fi
+
+    return 1
+}
+
 mkdir -p "$STATE_DIR"
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+if ! acquire_startup_lock; then
     logger -t "$PLUGIN_NAME" "Startup hook skipped: lock is already held (source=${EVENT_SOURCE})."
     exit 0
 fi
 
 cleanup_lock() {
-    rmdir "$LOCK_DIR" 2>/dev/null || true
+    rm -rf "$LOCK_DIR" 2>/dev/null || true
 }
 
 trap cleanup_lock EXIT
