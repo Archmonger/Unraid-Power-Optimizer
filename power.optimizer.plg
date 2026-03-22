@@ -146,21 +146,15 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     echo 'ENABLE_LTR_OPTIMIZATION="1"'
     echo 'ENABLE_L1SS_OPTIMIZATION="0"'
     echo 'ENABLE_PCI_RUNTIME_PM_OPTIMIZATION="1"'
-    echo 'FORCE_ASPM_MODE="0"'
-    echo 'FORCE_ASPM="0"'
-    echo 'MANUAL_FORCE_ASPM="0"'
-    echo 'MANUAL_TARGET_ASPM_MODE="3"'
-    echo 'MANUAL_INCLUDE_ENDPOINTS="1"'
-    echo 'MANUAL_INCLUDE_BRIDGES="1"'
+    echo 'FORCE_ASPM_ENDPOINT_MODE="0"'
+    echo 'FORCE_ASPM_BRIDGE_MODE="0"'
+    echo 'MANUAL_FORCE_INCOMPATIBLE="0"'
     echo 'MANUAL_SELECTED_DEVICES=""'
+    echo 'MANUAL_DEVICE_OPTIONS=""'
 
     echo 'CPU_MODE="automatic"'
     echo 'CPU_AUTO_EXECUTE_ON_STARTUP="0"'
-    echo 'ENABLE_CPU_GOVERNOR_OPTIMIZATION="1"'
-    echo 'CPU_GOVERNOR_TARGET="powersave"'
     echo 'CPU_GOVERNOR_MODE="powersave"'
-    echo 'ENABLE_CPU_TURBO_OPTIMIZATION="0"'
-    echo 'CPU_TURBO_TARGET="0"'
     echo 'CPU_TURBO_MODE="disabled"'
 
     echo 'ETHERNET_MODE="automatic"'
@@ -174,13 +168,7 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     echo 'DISKS_MODE="automatic"'
     echo 'DISKS_AUTO_EXECUTE_ON_STARTUP="0"'
     echo 'SATA_LPM_MODE="min_power"'
-    echo 'ENABLE_SATA_LPM_OPTIMIZATION="1"'
-    echo 'SATA_LPM_POLICY="min_power"'
-    echo 'ENABLE_DISK_RUNTIME_PM_OPTIMIZATION="1"'
-    echo 'DISK_RUNTIME_PM_TARGET="auto"'
     echo 'DISK_RUNTIME_PM_MODE="auto"'
-    echo 'ENABLE_ATA_RUNTIME_PM_OPTIMIZATION="1"'
-    echo 'ATA_RUNTIME_PM_TARGET="auto"'
     echo 'ATA_RUNTIME_PM_MODE="auto"'
 
     echo 'USB_MODE="automatic"'
@@ -193,8 +181,6 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
 
     echo 'I2C_MODE="automatic"'
     echo 'I2C_AUTO_EXECUTE_ON_STARTUP="0"'
-    echo 'ENABLE_I2C_RUNTIME_PM_OPTIMIZATION="1"'
-    echo 'I2C_RUNTIME_PM_TARGET="on"'
     echo 'I2C_RUNTIME_PM_MODE="on"'
     echo 'I2C_DEVICE_GLOB="i2c-*"'
 
@@ -205,10 +191,7 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     echo 'NMI_WATCHDOG_TARGET="0"'
     echo 'ENABLE_VM_WRITEBACK_TIMEOUT_OPTIMIZATION="1"'
     echo 'VM_DIRTY_WRITEBACK_CENTISECS="1500"'
-    echo 'VM_WRITEBACK_TIMEOUT_CENTISECS="1500"'
     echo 'POWER_AWARE_CPU_SCHEDULER_MODE="2"'
-    echo 'ENABLE_POWER_AWARE_CPU_SCHEDULER_OPTIMIZATION="1"'
-    echo 'POWER_AWARE_CPU_SCHEDULER_TARGET="2"'
   } > "$CONFIG_FILE"
 fi
 ]]></INLINE></FILE>

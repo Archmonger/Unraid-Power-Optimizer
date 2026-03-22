@@ -26,34 +26,32 @@ Title="PCI Express"
             </select>
         </label>
 
-        <label>
+        <label class="auto-only-control">
             <strong>Max PCI Express ASPM level</strong><br>
             <select id="max-aspm-level">
-                <option value="1">L0</option>
+                <option value="1">L0s</option>
                 <option value="2">L1</option>
-                <option value="3" selected>L0 &amp; L1</option>
+                <option value="3" selected>L0s &amp; L1</option>
             </select>
         </label>
 
-        <label>
+        <label class="auto-only-control">
             <strong>Force ASPM on unsupported endpoints</strong><br>
             <select id="force-aspm-endpoint-mode">
                 <option value="0" selected>disabled</option>
-                <option value="4">manual only</option>
-                <option value="1">L0</option>
+                <option value="1">L0s</option>
                 <option value="2">L1</option>
-                <option value="3">L0 &amp; L1</option>
+                <option value="3">L0s &amp; L1</option>
             </select>
         </label>
 
-        <label>
+        <label class="auto-only-control">
             <strong>Force ASPM on unsupported bridges</strong><br>
             <select id="force-aspm-bridge-mode">
                 <option value="0" selected>disabled</option>
-                <option value="4">manual only</option>
-                <option value="1">L0</option>
+                <option value="1">L0s</option>
                 <option value="2">L1</option>
-                <option value="3">L0 &amp; L1</option>
+                <option value="3">L0s &amp; L1</option>
             </select>
         </label>
 
@@ -62,27 +60,27 @@ Title="PCI Express"
             Auto Execute on Startup
         </label>
 
-        <label class="toggle-option">
+        <label class="toggle-option auto-only-control">
             <input type="checkbox" id="enable-aspm-optimization" checked>
             Enable ASPM Optimization
         </label>
 
-        <label class="toggle-option">
+        <label class="toggle-option auto-only-control">
             <input type="checkbox" id="enable-clkpm-optimization" checked>
             Enable CLKPM Optimization
         </label>
 
-        <label class="toggle-option">
+        <label class="toggle-option auto-only-control">
             <input type="checkbox" id="enable-ltr-optimization" checked>
             Enable LTR Optimization
         </label>
 
-        <label class="toggle-option">
+        <label class="toggle-option auto-only-control">
             <input type="checkbox" id="enable-l1ss-optimization">
-            Enable L1SS Optimization (requires strict compatibility)
+            Enable L1SS Optimization (requires strict multi-level compatibility)
         </label>
 
-        <label class="toggle-option">
+        <label class="toggle-option auto-only-control">
             <input type="checkbox" id="enable-pci-runtime-pm-optimization" checked>
             Enable PCI Runtime Power Management
         </label>
@@ -113,35 +111,34 @@ Title="PCI Express"
     <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
     <div id="automatic-panel" class="mode-panel">
-        <label for="blacklist-input"><strong>BLACK_LIST (one pattern per line)</strong></label>
-        <textarea id="blacklist-input" rows="8" spellcheck="false"></textarea>
+        <label for="blacklist-input"><strong>BLACK LIST</strong></label>
+        
         <p class="topology-note">
-            Syntax note: one match pattern per line. Patterns are regular expressions used with Linux <code>bash</code> matching.
+            One match pattern per line. Patterns are regular expressions used with Linux <code>bash</code> matching.
             Examples: <code>NVIDIA</code>, <code>Ethernet|Network</code>, <code>^0000:01:</code>.
         </p>
+
+        <textarea id="blacklist-input" rows="8" spellcheck="false"></textarea>
+
     </div>
 
     <div id="manual-panel" class="mode-panel hidden">
         <h3>Manual Controls</h3>
 
-        <div class="manual-grid">
-            <label class="toggle-option">
-                <input type="checkbox" id="manual-include-endpoints">
-                Include Endpoints
-            </label>
-            <label class="toggle-option">
-                <input type="checkbox" id="manual-include-bridges">
-                Include Bridges
-            </label>
-        </div>
+        <label class="toggle-option">
+            <input type="checkbox" id="manual-force-incompatible">
+            Force Incompatible Settings
+        </label>
 
         <p class="topology-note">
             Select devices in topology order. Parent bridge nodes may need to be selected and configured before their leaf endpoint nodes can successfully use ASPM.
+            ASPM Support is read from each device's PCIe Link Capabilities. The value <strong>unsupported</strong> means no ASPM capability bits are advertised, and
+            <strong>unknown</strong> means the capability could not be read.
         </p>
 
         <div class="device-controls">
             <button type="button" class="btn" id="refresh-devices">Refresh Devices</button>
-            <button type="button" class="btn" id="select-all-devices">Select All Eligible</button>
+            <button type="button" class="btn" id="select-all-devices">Select All</button>
             <button type="button" class="btn" id="select-none-devices">Select None</button>
             <span id="selected-count" class="selected-count">0 selected</span>
         </div>
@@ -150,7 +147,12 @@ Title="PCI Express"
             <table class="device-table">
                 <thead>
                     <tr>
-                        <th>Select</th>
+                        <th>Selected</th>
+                        <th>ASPM</th>
+                        <th>CLKPM</th>
+                        <th>LTR</th>
+                        <th>L1SS</th>
+                        <th>Runtime PM</th>
                         <th>Topology</th>
                         <th>PCI ID</th>
                         <th>Type</th>
@@ -163,10 +165,6 @@ Title="PCI Express"
             </table>
         </div>
 
-        <p class="aspm-support-note">
-            ASPM Support is read from each device's PCIe Link Capabilities: <strong>L0</strong>, <strong>L1</strong>, or <strong>L0 &amp; L1</strong>.
-            <strong>unsupported</strong> means no ASPM capability bits are advertised, and <strong>unknown</strong> means the capability could not be read.
-        </p>
     </div>
 
     <div id="optimizer-status-message" class="status-message" aria-live="polite">[--:--:--] Ready.</div>
@@ -187,13 +185,6 @@ Title="PCI Express"
 
 .mode-panel {
     margin: 12px 0;
-}
-
-.manual-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 10px;
-    margin-bottom: 10px;
 }
 
 .toggle-option {
@@ -253,6 +244,18 @@ Title="PCI Express"
     background: #232323;
 }
 
+.control-cell {
+    white-space: nowrap;
+}
+
+.control-cell select {
+    min-width: 84px;
+}
+
+.auto-only-hidden {
+    display: none;
+}
+
 .topology-cell {
     white-space: nowrap;
     font-family: Consolas, "Courier New", monospace;
@@ -302,11 +305,6 @@ Title="PCI Express"
     margin-top: 8px;
 }
 
-.aspm-support-note {
-    margin: 10px 0 0;
-    color: #9ca3af;
-    font-size: 0.95rem;
-}
 
 .modal-backdrop {
     position: fixed;
@@ -406,8 +404,7 @@ Title="PCI Express"
     const automaticPanel = document.getElementById('automatic-panel');
     const manualPanel = document.getElementById('manual-panel');
 
-    const manualIncludeEndpoints = document.getElementById('manual-include-endpoints');
-    const manualIncludeBridges = document.getElementById('manual-include-bridges');
+    const manualForceIncompatible = document.getElementById('manual-force-incompatible');
 
     const refreshDevicesButton = document.getElementById('refresh-devices');
     const selectAllDevicesButton = document.getElementById('select-all-devices');
@@ -422,10 +419,11 @@ Title="PCI Express"
     const syslinuxConfirmCancelButton = document.getElementById('syslinux-confirm-cancel');
     const syslinuxConfirmApplyButton = document.getElementById('syslinux-confirm-apply');
     const toastContainer = document.getElementById('toast-container');
+    const autoOnlyControls = Array.from(document.querySelectorAll('.auto-only-control'));
 
     const state = {
         devices: [],
-        selectedDevices: new Set(),
+        manualDeviceOptions: {},
         settings: null,
         executionLogPath: '/boot/logs/power.optimizer-pcie.log',
         executionLogTail: '',
@@ -615,8 +613,7 @@ Title="PCI Express"
             enableL1ssOptimization,
             enablePciRuntimePmOptimization,
             blacklistInput,
-            manualIncludeEndpoints,
-            manualIncludeBridges
+            manualForceIncompatible
         ].forEach(function (element) {
             element.addEventListener('change', updateSaveButtonState);
             element.addEventListener('input', updateSaveButtonState);
@@ -627,19 +624,148 @@ Title="PCI Express"
         return (csv || '').split(',').join('\n');
     }
 
+    function normalizeDeviceId(deviceId) {
+        return String(deviceId || '').trim().toLowerCase();
+    }
+
+    function defaultManualDeviceProfile() {
+        return {
+            enabled: 0,
+            enable_aspm: 1,
+            aspm_mode: 3,
+            enable_clkpm: 1,
+            enable_ltr: 1,
+            enable_l1ss: 0,
+            enable_runtime_pm: 0
+        };
+    }
+
+    function normalizeManualDeviceProfile(profile) {
+        const defaults = defaultManualDeviceProfile();
+        const enableAspm = Number(profile && profile.enable_aspm) === 1 ? 1 : 0;
+        const mode = Number(profile && profile.aspm_mode);
+        let aspmMode = [0, 1, 2, 3].indexOf(mode) !== -1 ? mode : defaults.aspm_mode;
+
+        if (enableAspm === 0 || aspmMode === 0) {
+            aspmMode = 0;
+        }
+
+        return {
+            enabled: Number(profile && profile.enabled) === 1 ? 1 : 0,
+            enable_aspm: aspmMode === 0 ? 0 : 1,
+            aspm_mode: aspmMode,
+            enable_clkpm: Number(profile && profile.enable_clkpm) === 1 ? 1 : 0,
+            enable_ltr: Number(profile && profile.enable_ltr) === 1 ? 1 : 0,
+            enable_l1ss: Number(profile && profile.enable_l1ss) === 1 ? 1 : 0,
+            enable_runtime_pm: Number(profile && profile.enable_runtime_pm) === 1 ? 1 : 0
+        };
+    }
+
+    function getManualDeviceProfile(deviceId) {
+        const key = normalizeDeviceId(deviceId);
+        const existing = state.manualDeviceOptions[key];
+        const profile = normalizeManualDeviceProfile(existing || defaultManualDeviceProfile());
+        state.manualDeviceOptions[key] = profile;
+        return profile;
+    }
+
+    function setManualDeviceProfile(deviceId, updates) {
+        const key = normalizeDeviceId(deviceId);
+        const current = getManualDeviceProfile(key);
+        state.manualDeviceOptions[key] = normalizeManualDeviceProfile(Object.assign({}, current, updates || {}));
+    }
+
+    function getManualSelectedDevices() {
+        return Object.keys(state.manualDeviceOptions)
+            .filter(function (deviceId) {
+                return Number(state.manualDeviceOptions[deviceId] && state.manualDeviceOptions[deviceId].enabled) === 1;
+            })
+            .sort();
+    }
+
     function renderModePanels() {
         const isManual = operationMode.value === 'manual';
         manualPanel.classList.toggle('hidden', !isManual);
         automaticPanel.classList.toggle('hidden', isManual);
+
+        autoOnlyControls.forEach(function (element) {
+            element.classList.toggle('auto-only-hidden', isManual);
+        });
     }
 
     function updateSelectedCount() {
-        selectedCount.textContent = state.selectedDevices.size + ' selected';
+        selectedCount.textContent = getManualSelectedDevices().length + ' selected';
     }
 
     function getEligibleState(device) {
+        if (operationMode.value === 'manual') {
+            return manualForceIncompatible.checked || Boolean(device.aspm_supported);
+        }
+
         const forceMode = device.type === 'bridge' ? forceAspmBridgeMode.value : forceAspmEndpointMode.value;
-        return device.aspm_supported || forceMode === '4';
+        return device.aspm_supported || forceMode !== '0';
+    }
+
+    function isFeatureSupported(device, feature) {
+        const key = feature + '_support';
+        const value = String(device[key] || 'unknown').toLowerCase();
+
+        if (value === 'supported') {
+            return true;
+        }
+
+        if (value === 'unsupported') {
+            return false;
+        }
+
+        return true;
+    }
+
+    function getStrictAspmSupportMode(device) {
+        const state = String(device.aspm_state || '').trim().toLowerCase();
+
+        if (state === 'l0' || state === 'l0s') {
+            return 1;
+        }
+
+        if (state === 'l1') {
+            return 2;
+        }
+
+        if (state === 'l0 & l1' || state === 'l0+l1' || state === 'l0s & l1' || state === 'l0s+l1') {
+            return 3;
+        }
+
+        return 0;
+    }
+
+    function getCompatibleAspmModes(device, forceIncompatible) {
+        if (forceIncompatible) {
+            return [0, 1, 2, 3];
+        }
+
+        const strictMode = getStrictAspmSupportMode(device);
+        if (strictMode === 1) {
+            return [0, 1];
+        }
+
+        if (strictMode === 2) {
+            return [0, 2];
+        }
+
+        if (strictMode === 3) {
+            return [0, 1, 2, 3];
+        }
+
+        return [0];
+    }
+
+    function getPreferredCompatibleAspmMode(device, forceIncompatible) {
+        if (forceIncompatible) {
+            return 3;
+        }
+
+        return getStrictAspmSupportMode(device);
     }
 
     function orderDevicesByTopology(devices) {
@@ -687,39 +813,122 @@ Title="PCI Express"
     }
 
     function renderDevices() {
-        const includeEndpoints = manualIncludeEndpoints.checked;
-        const includeBridges = manualIncludeBridges.checked;
+        const isManualMode = operationMode.value === 'manual';
+        const forceIncompatible = isManualMode && manualForceIncompatible.checked;
 
         deviceTableBody.textContent = '';
 
         const orderedDevices = orderDevicesByTopology(state.devices);
         orderedDevices.forEach((device) => {
-            if (device.type === 'endpoint' && !includeEndpoints) {
-                return;
-            }
-            if (device.type === 'bridge' && !includeBridges) {
-                return;
+            const selectable = getEligibleState(device);
+            const deviceKey = normalizeDeviceId(device.id);
+            const profile = isManualMode
+                ? getManualDeviceProfile(device.id)
+                : normalizeManualDeviceProfile(state.manualDeviceOptions[deviceKey] || {});
+            const aspmSupported = Boolean(device.aspm_supported);
+            const compatibleAspmModes = getCompatibleAspmModes(device, forceIncompatible);
+            const clkpmSupported = forceIncompatible || isFeatureSupported(device, 'clkpm');
+            const ltrSupported = forceIncompatible || isFeatureSupported(device, 'ltr');
+            const l1ssSupported = forceIncompatible || isFeatureSupported(device, 'l1ss');
+            const runtimePmSupported = isFeatureSupported(device, 'runtime_pm');
+
+            if (isManualMode && !aspmSupported && !forceIncompatible && profile.aspm_mode !== 0) {
+                profile.aspm_mode = 0;
+                profile.enable_aspm = 0;
+                state.manualDeviceOptions[deviceKey] = profile;
             }
 
-            const selectable = getEligibleState(device);
+            if (isManualMode && compatibleAspmModes.indexOf(Number(profile.aspm_mode)) === -1) {
+                const preferredMode = getPreferredCompatibleAspmMode(device, forceIncompatible);
+                profile.aspm_mode = preferredMode;
+                profile.enable_aspm = preferredMode === 0 ? 0 : 1;
+                state.manualDeviceOptions[deviceKey] = profile;
+            }
+
+            if (isManualMode && !clkpmSupported && profile.enable_clkpm === 1) {
+                profile.enable_clkpm = 0;
+                state.manualDeviceOptions[deviceKey] = profile;
+            }
+
+            if (isManualMode && !ltrSupported && profile.enable_ltr === 1) {
+                profile.enable_ltr = 0;
+                state.manualDeviceOptions[deviceKey] = profile;
+            }
+
+            if (isManualMode && !l1ssSupported && profile.enable_l1ss === 1) {
+                profile.enable_l1ss = 0;
+                state.manualDeviceOptions[deviceKey] = profile;
+            }
+
+            if (isManualMode && !runtimePmSupported && profile.enable_runtime_pm === 1) {
+                profile.enable_runtime_pm = 0;
+                state.manualDeviceOptions[deviceKey] = profile;
+            }
+
+            const isSelected = selectable && profile.enabled === 1;
             const row = document.createElement('tr');
             row.className = selectable ? '' : 'device-row-disabled';
 
-            const checkboxCell = document.createElement('td');
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.disabled = !selectable;
-            checkbox.checked = selectable && state.selectedDevices.has(device.id);
-            checkbox.addEventListener('change', function () {
-                if (checkbox.checked) {
-                    state.selectedDevices.add(device.id);
-                } else {
-                    state.selectedDevices.delete(device.id);
-                }
-                updateSelectedCount();
+            const enabledCell = document.createElement('td');
+            enabledCell.className = 'control-cell';
+            const enabledCheckbox = document.createElement('input');
+            enabledCheckbox.type = 'checkbox';
+            enabledCheckbox.disabled = !selectable;
+            enabledCheckbox.checked = isSelected;
+            enabledCheckbox.addEventListener('change', function () {
+                setManualDeviceProfile(device.id, { enabled: enabledCheckbox.checked ? 1 : 0 });
+                renderDevices();
+            });
+            enabledCell.appendChild(enabledCheckbox);
+
+            const aspmModeCell = document.createElement('td');
+            aspmModeCell.className = 'control-cell';
+            const aspmModeSelect = document.createElement('select');
+            const aspmLabels = {
+                0: 'No change',
+                1: 'L0s',
+                2: 'L1',
+                3: 'L0s & L1'
+            };
+            compatibleAspmModes.forEach(function (mode) {
+                const option = document.createElement('option');
+                option.value = String(mode);
+                option.textContent = aspmLabels[mode] || 'No change';
+                aspmModeSelect.appendChild(option);
+            });
+            aspmModeSelect.value = String(profile.aspm_mode != null ? profile.aspm_mode : 3);
+            aspmModeSelect.disabled = !isSelected || compatibleAspmModes.length <= 1;
+            aspmModeSelect.addEventListener('change', function () {
+                const selectedMode = Number(aspmModeSelect.value || 0);
+                setManualDeviceProfile(device.id, {
+                    enable_aspm: selectedMode === 0 ? 0 : 1,
+                    aspm_mode: selectedMode
+                });
                 updateSaveButtonState();
             });
-            checkboxCell.appendChild(checkbox);
+            aspmModeCell.appendChild(aspmModeSelect);
+
+            function createToggleCell(profileKey, supported) {
+                const cell = document.createElement('td');
+                cell.className = 'control-cell';
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.disabled = !isSelected || !supported;
+                checkbox.checked = isSelected && Number(profile[profileKey]) === 1;
+                checkbox.addEventListener('change', function () {
+                    const updates = {};
+                    updates[profileKey] = checkbox.checked ? 1 : 0;
+                    setManualDeviceProfile(device.id, updates);
+                    updateSaveButtonState();
+                });
+                cell.appendChild(checkbox);
+                return cell;
+            }
+
+            const clkpmCell = createToggleCell('enable_clkpm', clkpmSupported);
+            const ltrCell = createToggleCell('enable_ltr', ltrSupported);
+            const l1ssCell = createToggleCell('enable_l1ss', l1ssSupported);
+            const runtimePmCell = createToggleCell('enable_runtime_pm', runtimePmSupported);
 
             const topologyCell = document.createElement('td');
             topologyCell.className = 'topology-cell';
@@ -735,7 +944,7 @@ Title="PCI Express"
             typeCell.textContent = device.type;
 
             const aspmCell = document.createElement('td');
-            aspmCell.textContent = device.aspm_state;
+            aspmCell.textContent = String(device.aspm_state || 'unknown').replace(/\bL0\b/gi, 'L0s');
 
             const aspmRuntimeCell = document.createElement('td');
             aspmRuntimeCell.textContent = device.aspm_runtime || 'unknown';
@@ -743,7 +952,12 @@ Title="PCI Express"
             const descriptionCell = document.createElement('td');
             descriptionCell.textContent = device.description;
 
-            row.appendChild(checkboxCell);
+            row.appendChild(enabledCell);
+            row.appendChild(aspmModeCell);
+            row.appendChild(clkpmCell);
+            row.appendChild(ltrCell);
+            row.appendChild(l1ssCell);
+            row.appendChild(runtimePmCell);
             row.appendChild(topologyCell);
             row.appendChild(idCell);
             row.appendChild(typeCell);
@@ -751,6 +965,15 @@ Title="PCI Express"
             row.appendChild(aspmRuntimeCell);
             row.appendChild(descriptionCell);
             deviceTableBody.appendChild(row);
+
+            if (!isManualMode) {
+                enabledCheckbox.disabled = true;
+                aspmModeSelect.disabled = true;
+                clkpmCell.querySelector('input').disabled = true;
+                ltrCell.querySelector('input').disabled = true;
+                l1ssCell.querySelector('input').disabled = true;
+                runtimePmCell.querySelector('input').disabled = true;
+            }
         });
 
         updateSelectedCount();
@@ -767,20 +990,29 @@ Title="PCI Express"
         enableAspmOptimization.checked = Number(settings.enable_aspm_optimization || 0) === 1;
         enableClkpmOptimization.checked = Number(settings.enable_clkpm_optimization || 0) === 1;
         enableLtrOptimization.checked = Number(settings.enable_ltr_optimization || 0) === 1;
-        const legacyForceAspmMode = settings.force_aspm_mode ?? (Number(settings.force_aspm ?? settings.manual_force_aspm ?? 0) === 1
-            ? (settings.manual_target_aspm_mode || 3)
-            : 0);
-        forceAspmEndpointMode.value = String(settings.force_aspm_endpoint_mode ?? legacyForceAspmMode);
-        forceAspmBridgeMode.value = String(settings.force_aspm_bridge_mode ?? legacyForceAspmMode);
+        forceAspmEndpointMode.value = String(settings.force_aspm_endpoint_mode ?? 0);
+        forceAspmBridgeMode.value = String(settings.force_aspm_bridge_mode ?? 0);
         enableL1ssOptimization.checked = Number(settings.enable_l1ss_optimization || 0) === 1;
         enablePciRuntimePmOptimization.checked = Number(settings.enable_pci_runtime_pm_optimization ?? 1) === 1;
 
         blacklistInput.value = csvToTextarea(settings.blacklist_csv || '');
 
-        manualIncludeEndpoints.checked = Number(settings.manual_include_endpoints || 0) === 1;
-        manualIncludeBridges.checked = Number(settings.manual_include_bridges || 0) === 1;
+        manualForceIncompatible.checked = Number(settings.manual_force_incompatible || 0) === 1;
 
-        state.selectedDevices = new Set(settings.manual_selected_devices || []);
+        state.manualDeviceOptions = {};
+        const rawManualOptions = settings.manual_device_options || {};
+        Object.keys(rawManualOptions).forEach(function (deviceId) {
+            const normalizedId = normalizeDeviceId(deviceId);
+            state.manualDeviceOptions[normalizedId] = normalizeManualDeviceProfile(rawManualOptions[deviceId]);
+        });
+
+        (settings.manual_selected_devices || []).forEach(function (deviceId) {
+            const normalizedId = normalizeDeviceId(deviceId);
+            const profile = state.manualDeviceOptions[normalizedId] || defaultManualDeviceProfile();
+            profile.enabled = 1;
+            state.manualDeviceOptions[normalizedId] = normalizeManualDeviceProfile(profile);
+        });
+
         renderModePanels();
         renderDevices();
         markSettingsSaved();
@@ -822,9 +1054,8 @@ Title="PCI Express"
             force_aspm_bridge_mode: forceAspmBridgeMode.value,
             enable_l1ss_optimization: enableL1ssOptimization.checked ? '1' : '0',
             enable_pci_runtime_pm_optimization: enablePciRuntimePmOptimization.checked ? '1' : '0',
-            manual_include_endpoints: manualIncludeEndpoints.checked ? '1' : '0',
-            manual_include_bridges: manualIncludeBridges.checked ? '1' : '0',
-            manual_selected_devices: Array.from(state.selectedDevices).join(',')
+            manual_force_incompatible: manualForceIncompatible.checked ? '1' : '0',
+            manual_device_options: JSON.stringify(state.manualDeviceOptions)
         };
     }
 
@@ -850,11 +1081,15 @@ Title="PCI Express"
 
     operationMode.addEventListener('change', function () {
         renderModePanels();
+        renderDevices();
         updateSaveButtonState();
     });
 
     forceAspmEndpointMode.addEventListener('change', function () {
         updateSaveButtonState();
+        if (operationMode.value === 'manual') {
+            return;
+        }
         loadDevices().catch(function (error) {
             setStatus('Device refresh failed: ' + error.message, true);
         });
@@ -862,13 +1097,18 @@ Title="PCI Express"
 
     forceAspmBridgeMode.addEventListener('change', function () {
         updateSaveButtonState();
+        if (operationMode.value === 'manual') {
+            return;
+        }
         loadDevices().catch(function (error) {
             setStatus('Device refresh failed: ' + error.message, true);
         });
     });
 
-    manualIncludeEndpoints.addEventListener('change', renderDevices);
-    manualIncludeBridges.addEventListener('change', renderDevices);
+    manualForceIncompatible.addEventListener('change', function () {
+        renderDevices();
+        updateSaveButtonState();
+    });
 
     refreshDevicesButton.addEventListener('click', async function () {
         setStatus('Refreshing PCI device list...', false);
@@ -881,27 +1121,51 @@ Title="PCI Express"
     });
 
     selectAllDevicesButton.addEventListener('click', function () {
-        const includeEndpoints = manualIncludeEndpoints.checked;
-        const includeBridges = manualIncludeBridges.checked;
+        const forceIncompatible = manualForceIncompatible.checked;
 
         state.devices.forEach((device) => {
-            if (device.type === 'endpoint' && !includeEndpoints) {
-                return;
-            }
-            if (device.type === 'bridge' && !includeBridges) {
-                return;
-            }
             if (getEligibleState(device)) {
-                state.selectedDevices.add(device.id);
+                const profile = getManualDeviceProfile(device.id);
+                const compatibleAspmModes = getCompatibleAspmModes(device, forceIncompatible);
+                const preferredAspmMode = getPreferredCompatibleAspmMode(device, forceIncompatible);
+                const aspmSupported = compatibleAspmModes.indexOf(preferredAspmMode) !== -1 && preferredAspmMode !== 0;
+                const clkpmSupported = forceIncompatible || isFeatureSupported(device, 'clkpm');
+                const ltrSupported = forceIncompatible || isFeatureSupported(device, 'ltr');
+                const l1ssSupported = forceIncompatible || isFeatureSupported(device, 'l1ss');
+                const runtimePmSupported = isFeatureSupported(device, 'runtime_pm');
+
+                const updates = {
+                    enabled: 1,
+                    enable_clkpm: clkpmSupported ? 1 : 0,
+                    enable_ltr: ltrSupported ? 1 : 0,
+                    enable_l1ss: l1ssSupported ? 1 : 0,
+                    enable_runtime_pm: runtimePmSupported ? 1 : 0
+                };
+
+                if (aspmSupported && (Number(profile.aspm_mode) === 0 || compatibleAspmModes.indexOf(Number(profile.aspm_mode)) === -1)) {
+                    updates.enable_aspm = 1;
+                    updates.aspm_mode = preferredAspmMode;
+                }
+
+                setManualDeviceProfile(device.id, updates);
             }
         });
 
         renderDevices();
+        updateSaveButtonState();
     });
 
     selectNoneDevicesButton.addEventListener('click', function () {
-        state.selectedDevices.clear();
+        Object.keys(state.manualDeviceOptions).forEach(function (deviceId) {
+            setManualDeviceProfile(deviceId, { enabled: 0 });
+        });
+
+        state.devices.forEach(function (device) {
+            setManualDeviceProfile(device.id, { enabled: 0 });
+        });
+
         renderDevices();
+        updateSaveButtonState();
     });
 
     saveButton.addEventListener('click', async function () {

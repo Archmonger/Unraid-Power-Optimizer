@@ -35,24 +35,15 @@ function default_settings(): array
         'ENABLE_LTR_OPTIMIZATION' => '1',
         'ENABLE_L1SS_OPTIMIZATION' => '0',
         'ENABLE_PCI_RUNTIME_PM_OPTIMIZATION' => '1',
-        'FORCE_ASPM_MODE' => '0',
         'FORCE_ASPM_ENDPOINT_MODE' => '0',
         'FORCE_ASPM_BRIDGE_MODE' => '0',
-        'FORCE_ASPM' => '0',
-        // Compatibility key retained for migration support with prior UI/script versions.
-        'MANUAL_FORCE_ASPM' => '0',
-        'MANUAL_TARGET_ASPM_MODE' => '3',
-        'MANUAL_INCLUDE_ENDPOINTS' => '1',
-        'MANUAL_INCLUDE_BRIDGES' => '1',
+        'MANUAL_FORCE_INCOMPATIBLE' => '0',
         'MANUAL_SELECTED_DEVICES' => '',
+        'MANUAL_DEVICE_OPTIONS' => '',
 
         'CPU_MODE' => 'automatic',
         'CPU_AUTO_EXECUTE_ON_STARTUP' => '0',
-        'ENABLE_CPU_GOVERNOR_OPTIMIZATION' => '1',
-        'CPU_GOVERNOR_TARGET' => 'powersave',
         'CPU_GOVERNOR_MODE' => 'powersave',
-        'ENABLE_CPU_TURBO_OPTIMIZATION' => '0',
-        'CPU_TURBO_TARGET' => '0',
         'CPU_TURBO_MODE' => 'disabled',
 
         'ETHERNET_MODE' => 'automatic',
@@ -63,22 +54,10 @@ function default_settings(): array
         'ETHERNET_WOL_TARGET' => 'd',
         'ETHERNET_MANUAL_INTERFACES' => '',
 
-        // Compatibility keys retained for migration from older WOL tab versions.
-        'WOL_MODE' => 'automatic',
-        'ENABLE_WOL_OPTIMIZATION' => '1',
-        'WOL_TARGET' => 'd',
-        'WOL_MANUAL_INTERFACES' => '',
-
         'DISKS_MODE' => 'automatic',
         'DISKS_AUTO_EXECUTE_ON_STARTUP' => '0',
         'SATA_LPM_MODE' => 'min_power',
-        'ENABLE_SATA_LPM_OPTIMIZATION' => '1',
-        'SATA_LPM_POLICY' => 'min_power',
-        'ENABLE_DISK_RUNTIME_PM_OPTIMIZATION' => '1',
-        'DISK_RUNTIME_PM_TARGET' => 'auto',
         'DISK_RUNTIME_PM_MODE' => 'auto',
-        'ENABLE_ATA_RUNTIME_PM_OPTIMIZATION' => '1',
-        'ATA_RUNTIME_PM_TARGET' => 'auto',
         'ATA_RUNTIME_PM_MODE' => 'auto',
 
         'USB_MODE' => 'automatic',
@@ -91,8 +70,6 @@ function default_settings(): array
 
         'I2C_MODE' => 'automatic',
         'I2C_AUTO_EXECUTE_ON_STARTUP' => '0',
-        'ENABLE_I2C_RUNTIME_PM_OPTIMIZATION' => '1',
-        'I2C_RUNTIME_PM_TARGET' => 'on',
         'I2C_RUNTIME_PM_MODE' => 'on',
         'I2C_DEVICE_GLOB' => 'i2c-*',
 
@@ -108,11 +85,7 @@ function default_settings(): array
         'VFS_CACHE_MAX_AGE' => '60000',
         'ZFS_ARC_MIN_PERCENT' => '10',
         'ZFS_ARC_MAX_PERCENT' => '40',
-        // Compatibility key retained for migration support with prior script versions.
-        'VM_WRITEBACK_TIMEOUT_CENTISECS' => '1500',
         'POWER_AWARE_CPU_SCHEDULER_MODE' => '2',
-        'ENABLE_POWER_AWARE_CPU_SCHEDULER_OPTIMIZATION' => '1',
-        'POWER_AWARE_CPU_SCHEDULER_TARGET' => '2',
     ];
 }
 
@@ -195,6 +168,153 @@ function normalize_csv_items(string $raw): array
     return array_values(array_unique($items));
 }
 
+function normalize_pci_device_identifier(string $value): string
+{
+    $normalized = normalize_pci_device_id($value);
+    return preg_match('/^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$/', $normalized) === 1
+        ? $normalized
+        : '';
+}
+
+function default_manual_device_profile(): array
+{
+    return [
+        'enabled' => 0,
+        'enable_aspm' => 1,
+        'aspm_mode' => 3,
+        'enable_clkpm' => 1,
+        'enable_ltr' => 1,
+        'enable_l1ss' => 0,
+        'enable_runtime_pm' => 0,
+    ];
+}
+
+function normalize_manual_device_profile(array $profile): array
+{
+    $defaults = default_manual_device_profile();
+    $enableAspm = normalize_boolean($profile['enable_aspm'] ?? null, $defaults['enable_aspm']);
+
+    $aspmModeRaw = strtolower(trim((string)($profile['aspm_mode'] ?? $defaults['aspm_mode'])));
+    if (in_array($aspmModeRaw, ['0', 'disabled', 'off', 'none', 'no-change', 'no_change', 'nochange'], true)) {
+        $aspmMode = 0;
+    } else {
+        $aspmMode = normalize_aspm_level($aspmModeRaw, $defaults['aspm_mode']);
+    }
+
+    if (!in_array($aspmMode, [0, 1, 2, 3], true)) {
+        $aspmMode = $defaults['aspm_mode'];
+    }
+
+    if ($enableAspm === 0 || $aspmMode === 0) {
+        $enableAspm = 0;
+        $aspmMode = 0;
+    } else {
+        $enableAspm = 1;
+    }
+
+    return [
+        'enabled' => normalize_boolean($profile['enabled'] ?? null, $defaults['enabled']),
+        'enable_aspm' => $enableAspm,
+        'aspm_mode' => $aspmMode,
+        'enable_clkpm' => normalize_boolean($profile['enable_clkpm'] ?? null, $defaults['enable_clkpm']),
+        'enable_ltr' => normalize_boolean($profile['enable_ltr'] ?? null, $defaults['enable_ltr']),
+        'enable_l1ss' => normalize_boolean($profile['enable_l1ss'] ?? null, $defaults['enable_l1ss']),
+        'enable_runtime_pm' => normalize_boolean($profile['enable_runtime_pm'] ?? null, $defaults['enable_runtime_pm']),
+    ];
+}
+
+function decode_manual_device_options(string $raw): array
+{
+    $result = [];
+    $entries = array_filter(array_map('trim', explode(';', $raw)), static function ($entry): bool {
+        return $entry !== '';
+    });
+
+    foreach ($entries as $entry) {
+        $parts = array_map('trim', explode(',', $entry));
+        if (count($parts) !== 8) {
+            continue;
+        }
+
+        $deviceId = normalize_pci_device_identifier((string)$parts[0]);
+        if ($deviceId === '') {
+            continue;
+        }
+
+        $result[$deviceId] = normalize_manual_device_profile([
+            'enabled' => $parts[1],
+            'enable_aspm' => $parts[2],
+            'aspm_mode' => $parts[3],
+            'enable_clkpm' => $parts[4],
+            'enable_ltr' => $parts[5],
+            'enable_l1ss' => $parts[6],
+            'enable_runtime_pm' => $parts[7],
+        ]);
+    }
+
+    ksort($result, SORT_STRING);
+    return $result;
+}
+
+function encode_manual_device_options(array $options): string
+{
+    if (count($options) === 0) {
+        return '';
+    }
+
+    $encodedEntries = [];
+    ksort($options, SORT_STRING);
+    foreach ($options as $deviceId => $profile) {
+        $normalizedId = normalize_pci_device_identifier((string)$deviceId);
+        if ($normalizedId === '') {
+            continue;
+        }
+
+        $normalizedProfile = normalize_manual_device_profile((array)$profile);
+        $encodedEntries[] = implode(',', [
+            $normalizedId,
+            (string)$normalizedProfile['enabled'],
+            (string)$normalizedProfile['enable_aspm'],
+            (string)$normalizedProfile['aspm_mode'],
+            (string)$normalizedProfile['enable_clkpm'],
+            (string)$normalizedProfile['enable_ltr'],
+            (string)$normalizedProfile['enable_l1ss'],
+            (string)$normalizedProfile['enable_runtime_pm'],
+        ]);
+    }
+
+    return implode(';', $encodedEntries);
+}
+
+function normalize_manual_device_options_from_post($raw): array
+{
+    if (!is_string($raw) || trim($raw) === '') {
+        return [];
+    }
+
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) {
+        return [];
+    }
+
+    $result = [];
+    foreach ($decoded as $deviceId => $profile) {
+        if (!is_array($profile)) {
+            continue;
+        }
+
+        $normalizedId = normalize_pci_device_identifier((string)$deviceId);
+        if ($normalizedId === '') {
+            continue;
+        }
+
+        $result[$normalizedId] = normalize_manual_device_profile($profile);
+    }
+
+    ksort($result, SORT_STRING);
+    return $result;
+}
+
 function normalize_boolean($value, int $default = 1): int
 {
     if ($value === null) {
@@ -214,13 +334,13 @@ function normalize_mode($value, string $default = 'automatic'): string
 function normalize_aspm_level($value, int $default = 3): int
 {
     $normalized = strtolower(trim((string)$value));
-    if (in_array($normalized, ['1', 'l0', 'l0s'], true)) {
+    if ($normalized === '1') {
         return 1;
     }
-    if (in_array($normalized, ['2', 'l1'], true)) {
+    if ($normalized === '2') {
         return 2;
     }
-    if (in_array($normalized, ['3', 'l0+l1', 'l0s+l1', 'both', 'auto'], true)) {
+    if ($normalized === '3') {
         return 3;
     }
     return $default;
@@ -229,19 +349,19 @@ function normalize_aspm_level($value, int $default = 3): int
 function normalize_force_aspm_mode($value, int $default = 0): int
 {
     $normalized = strtolower(trim((string)$value));
-    if (in_array($normalized, ['0', 'disabled', 'off'], true)) {
+    if ($normalized === '0') {
         return 0;
     }
-    if (in_array($normalized, ['1', 'l0', 'l0s'], true)) {
+    if ($normalized === '1') {
         return 1;
     }
-    if (in_array($normalized, ['2', 'l1'], true)) {
+    if ($normalized === '2') {
         return 2;
     }
-    if (in_array($normalized, ['3', 'l0+l1', 'l0s+l1', 'both', 'auto'], true)) {
+    if ($normalized === '3') {
         return 3;
     }
-    if (in_array($normalized, ['4', 'manual-only', 'manual_only', 'manualonly', 'manual'], true)) {
+    if ($normalized === '4') {
         return 4;
     }
     return $default;
@@ -314,8 +434,7 @@ function normalize_usb_runtime_pm_target($value, string $default = 'auto'): stri
         return 'auto';
     }
 
-    // Map legacy "on" values to disabled to preserve intent after UI migration.
-    if (in_array($normalized, ['disabled', 'off', 'on'], true)) {
+    if (in_array($normalized, ['disabled', 'off'], true)) {
         return 'disabled';
     }
 
@@ -337,11 +456,6 @@ function normalize_disks_runtime_pm_mode($value, string $default = 'auto'): stri
     $normalized = strtolower(trim((string)$value));
     if ($normalized === 'disabled' || $normalized === 'off') {
         return 'disabled';
-    }
-
-    // Powertop-friendly migration: legacy "on" maps to runtime-PM-enabled "auto".
-    if ($normalized === 'on') {
-        return 'auto';
     }
 
     return $normalized === 'auto' ? 'auto' : $default;
@@ -366,16 +480,7 @@ function normalize_sata_lpm_mode($value, string $default = 'min_power'): string
 
 function sata_lpm_mode_from_raw(array $raw): string
 {
-    if (array_key_exists('SATA_LPM_MODE', $raw)) {
-        return normalize_sata_lpm_mode($raw['SATA_LPM_MODE'], 'min_power');
-    }
-
-    $enabled = normalize_boolean($raw['ENABLE_SATA_LPM_OPTIMIZATION'] ?? null, 1);
-    if ($enabled === 0) {
-        return 'disabled';
-    }
-
-    return normalize_sata_lpm_mode($raw['SATA_LPM_POLICY'] ?? 'min_power', 'min_power');
+    return normalize_sata_lpm_mode($raw['SATA_LPM_MODE'] ?? 'min_power', 'min_power');
 }
 
 function normalize_int_range($value, int $default, int $min, int $max): int
@@ -403,16 +508,7 @@ function normalize_power_aware_scheduler_mode($value, int $default = 2): int
 
 function power_aware_scheduler_mode_from_raw(array $raw): int
 {
-    if (array_key_exists('POWER_AWARE_CPU_SCHEDULER_MODE', $raw)) {
-        return normalize_power_aware_scheduler_mode($raw['POWER_AWARE_CPU_SCHEDULER_MODE'], 2);
-    }
-
-    $enabled = normalize_boolean($raw['ENABLE_POWER_AWARE_CPU_SCHEDULER_OPTIMIZATION'] ?? null, 1);
-    if ($enabled === 0) {
-        return 0;
-    }
-
-    return normalize_power_aware_scheduler_mode($raw['POWER_AWARE_CPU_SCHEDULER_TARGET'] ?? 2, 2);
+    return normalize_power_aware_scheduler_mode($raw['POWER_AWARE_CPU_SCHEDULER_MODE'] ?? 2, 2);
 }
 
 function normalize_runtime_target_list(array $targets): array
@@ -697,32 +793,15 @@ function constrain_runtime_pm_mode(string $mode, array $availableTargets, string
     return $targets[0];
 }
 
-function runtime_pm_mode_from_raw(array $raw, string $modeKey, string $enableKey, string $targetKey, string $default): string
+function runtime_pm_mode_from_raw(array $raw, string $modeKey, string $default): string
 {
-    if (array_key_exists($modeKey, $raw)) {
-        return normalize_runtime_pm_mode($raw[$modeKey], $default);
-    }
-
-    $enable = normalize_boolean($raw[$enableKey] ?? null, $default === 'disabled' ? 0 : 1);
-    if ($enable === 0) {
-        return 'disabled';
-    }
-
-    return normalize_runtime_pm_mode($raw[$targetKey] ?? $default, $default);
+    return normalize_runtime_pm_mode($raw[$modeKey] ?? $default, $default);
 }
 
 function cpu_governor_mode_from_raw(array $raw, array $availableGovernors): string
 {
     $default = in_array('powersave', $availableGovernors, true) ? 'powersave' : 'disabled';
-
-    if (array_key_exists('CPU_GOVERNOR_MODE', $raw)) {
-        $mode = normalize_cpu_governor_mode($raw['CPU_GOVERNOR_MODE'], $default);
-    } else {
-        $enable = normalize_boolean($raw['ENABLE_CPU_GOVERNOR_OPTIMIZATION'] ?? null, $default === 'disabled' ? 0 : 1);
-        $mode = $enable === 1
-            ? normalize_governor($raw['CPU_GOVERNOR_TARGET'] ?? $default, $default)
-            : 'disabled';
-    }
+    $mode = normalize_cpu_governor_mode($raw['CPU_GOVERNOR_MODE'] ?? $default, $default);
 
     if ($mode === 'disabled') {
         return 'disabled';
@@ -737,18 +816,7 @@ function cpu_turbo_mode_from_raw(array $raw, bool $supportsCpuTurbo): string
         return 'disabled';
     }
 
-    if (array_key_exists('CPU_TURBO_MODE', $raw)) {
-        return normalize_cpu_turbo_mode($raw['CPU_TURBO_MODE'], 'disabled');
-    }
-
-    $enable = normalize_boolean($raw['ENABLE_CPU_TURBO_OPTIMIZATION'] ?? null, 0);
-    if ($enable === 0) {
-        return 'disabled';
-    }
-
-    return normalize_boolean($raw['CPU_TURBO_TARGET'] ?? null, 0) === 1
-        ? 'force_enabled'
-        : 'force_disabled';
+    return normalize_cpu_turbo_mode($raw['CPU_TURBO_MODE'] ?? 'disabled', 'disabled');
 }
 
 function pcie_settings_from_raw(array $raw): array
@@ -758,29 +826,42 @@ function pcie_settings_from_raw(array $raw): array
         $blacklistCsv = 'Example1,Example2';
     }
 
-    $manualSelectedDevices = normalize_csv_items((string)($raw['MANUAL_SELECTED_DEVICES'] ?? ''));
-    $fallbackForceAspm = normalize_boolean($raw['FORCE_ASPM'] ?? ($raw['MANUAL_FORCE_ASPM'] ?? null), 0);
-    $fallbackTargetMode = normalize_aspm_level($raw['MANUAL_TARGET_ASPM_MODE'] ?? 3, 3);
-    $legacyForceAspmMode = normalize_force_aspm_mode(
-        $raw['FORCE_ASPM_MODE'] ?? ($fallbackForceAspm === 1 ? $fallbackTargetMode : 0),
-        0
-    );
+    $manualSelectedDevicesRaw = normalize_csv_items((string)($raw['MANUAL_SELECTED_DEVICES'] ?? ''));
     $forceAspmEndpointMode = normalize_force_aspm_mode(
-        $raw['FORCE_ASPM_ENDPOINT_MODE'] ?? $legacyForceAspmMode,
+        $raw['FORCE_ASPM_ENDPOINT_MODE'] ?? 0,
         0
     );
     $forceAspmBridgeMode = normalize_force_aspm_mode(
-        $raw['FORCE_ASPM_BRIDGE_MODE'] ?? $legacyForceAspmMode,
+        $raw['FORCE_ASPM_BRIDGE_MODE'] ?? 0,
         0
     );
-    $forceAspm = ($forceAspmEndpointMode !== 0 || $forceAspmBridgeMode !== 0) ? 1 : 0;
-    $manualTargetMode = $fallbackTargetMode;
-    if (
-        $forceAspmEndpointMode === $forceAspmBridgeMode
-        && in_array($forceAspmEndpointMode, [1, 2, 3], true)
-    ) {
-        $manualTargetMode = $forceAspmEndpointMode;
+
+    $manualDeviceOptions = decode_manual_device_options((string)($raw['MANUAL_DEVICE_OPTIONS'] ?? ''));
+    $selectedMap = [];
+
+    foreach ($manualSelectedDevicesRaw as $deviceId) {
+        $normalizedId = normalize_pci_device_identifier($deviceId);
+        if ($normalizedId === '') {
+            continue;
+        }
+
+        $selectedMap[$normalizedId] = true;
+        if (!array_key_exists($normalizedId, $manualDeviceOptions)) {
+            $manualDeviceOptions[$normalizedId] = default_manual_device_profile();
+        }
+        $manualDeviceOptions[$normalizedId]['enabled'] = 1;
     }
+
+    foreach ($manualDeviceOptions as $deviceId => $profile) {
+        $manualDeviceOptions[$deviceId] = normalize_manual_device_profile($profile);
+        if ($manualDeviceOptions[$deviceId]['enabled'] === 1) {
+            $selectedMap[$deviceId] = true;
+        }
+    }
+
+    ksort($manualDeviceOptions, SORT_STRING);
+    $manualSelectedDevices = array_keys($selectedMap);
+    sort($manualSelectedDevices, SORT_STRING);
 
     return [
         'blacklist_csv' => $blacklistCsv,
@@ -792,16 +873,12 @@ function pcie_settings_from_raw(array $raw): array
         'enable_ltr_optimization' => normalize_boolean($raw['ENABLE_LTR_OPTIMIZATION'] ?? null, 1),
         'enable_l1ss_optimization' => normalize_boolean($raw['ENABLE_L1SS_OPTIMIZATION'] ?? null, 0),
         'enable_pci_runtime_pm_optimization' => normalize_boolean($raw['ENABLE_PCI_RUNTIME_PM_OPTIMIZATION'] ?? null, 1),
-        'force_aspm_mode' => $legacyForceAspmMode,
         'force_aspm_endpoint_mode' => $forceAspmEndpointMode,
         'force_aspm_bridge_mode' => $forceAspmBridgeMode,
-        'force_aspm' => $forceAspm,
-        'manual_force_aspm' => $forceAspm,
-        'manual_target_aspm_mode' => $manualTargetMode,
-        'manual_include_endpoints' => normalize_boolean($raw['MANUAL_INCLUDE_ENDPOINTS'] ?? null, 1),
-        'manual_include_bridges' => normalize_boolean($raw['MANUAL_INCLUDE_BRIDGES'] ?? null, 1),
+        'manual_force_incompatible' => normalize_boolean($raw['MANUAL_FORCE_INCOMPATIBLE'] ?? null, 0),
         'manual_selected_devices' => $manualSelectedDevices,
         'manual_selected_devices_csv' => implode(',', $manualSelectedDevices),
+        'manual_device_options' => $manualDeviceOptions,
     ];
 }
 
@@ -812,19 +889,11 @@ function cpu_settings_from_raw(array $raw): array
     $governorMode = cpu_governor_mode_from_raw($raw, $availableGovernors);
     $turboMode = cpu_turbo_mode_from_raw($raw, $capabilities['supports_cpu_turbo']);
 
-    $fallbackGovernor = in_array('powersave', $availableGovernors, true)
-        ? 'powersave'
-        : (count($availableGovernors) > 0 ? $availableGovernors[0] : 'powersave');
-
     return [
         'auto_execute_on_startup' => normalize_boolean($raw['CPU_AUTO_EXECUTE_ON_STARTUP'] ?? null, 0),
         'cpu_mode' => normalize_mode($raw['CPU_MODE'] ?? 'automatic', 'automatic'),
         'cpu_governor_mode' => $governorMode,
         'cpu_turbo_mode' => $turboMode,
-        'enable_cpu_governor_optimization' => $governorMode === 'disabled' ? 0 : 1,
-        'cpu_governor_target' => $governorMode === 'disabled' ? $fallbackGovernor : $governorMode,
-        'enable_cpu_turbo_optimization' => $turboMode === 'disabled' ? 0 : 1,
-        'cpu_turbo_target' => $turboMode === 'force_enabled' ? 1 : 0,
         'available_governors' => $availableGovernors,
         'supports_cpu_turbo' => $capabilities['supports_cpu_turbo'],
     ];
@@ -832,16 +901,13 @@ function cpu_settings_from_raw(array $raw): array
 
 function ethernet_settings_from_raw(array $raw): array
 {
-    $fallbackEnableWol = normalize_boolean($raw['ENABLE_WOL_OPTIMIZATION'] ?? null, 1);
-    $fallbackWolTarget = normalize_wol_target($raw['WOL_TARGET'] ?? 'd', 'd');
-
     return [
         'auto_execute_on_startup' => normalize_boolean($raw['ETHERNET_AUTO_EXECUTE_ON_STARTUP'] ?? null, 0),
         'ethernet_mode' => normalize_mode($raw['ETHERNET_MODE'] ?? 'automatic', 'automatic'),
         'enable_ethernet_eee_optimization' => normalize_boolean($raw['ENABLE_ETHERNET_EEE_OPTIMIZATION'] ?? null, 1),
         'ethernet_eee_target' => normalize_on_off($raw['ETHERNET_EEE_TARGET'] ?? 'on', 'on'),
-        'enable_ethernet_wol_optimization' => normalize_boolean($raw['ENABLE_ETHERNET_WOL_OPTIMIZATION'] ?? null, $fallbackEnableWol),
-        'ethernet_wol_target' => normalize_wol_target($raw['ETHERNET_WOL_TARGET'] ?? $fallbackWolTarget, 'd'),
+        'enable_ethernet_wol_optimization' => normalize_boolean($raw['ENABLE_ETHERNET_WOL_OPTIMIZATION'] ?? null, 1),
+        'ethernet_wol_target' => normalize_wol_target($raw['ETHERNET_WOL_TARGET'] ?? 'd', 'd'),
         'ethernet_manual_interfaces_csv' => implode(',', normalize_csv_items((string)($raw['ETHERNET_MANUAL_INTERFACES'] ?? ''))),
     ];
 }
@@ -854,11 +920,11 @@ function disks_settings_from_raw(array $raw): array
     ];
     $sataMode = sata_lpm_mode_from_raw($raw);
     $diskMode = normalize_disks_runtime_pm_mode(
-        runtime_pm_mode_from_raw($raw, 'DISK_RUNTIME_PM_MODE', 'ENABLE_DISK_RUNTIME_PM_OPTIMIZATION', 'DISK_RUNTIME_PM_TARGET', 'auto'),
+        runtime_pm_mode_from_raw($raw, 'DISK_RUNTIME_PM_MODE', 'auto'),
         'auto'
     );
     $ataMode = normalize_disks_runtime_pm_mode(
-        runtime_pm_mode_from_raw($raw, 'ATA_RUNTIME_PM_MODE', 'ENABLE_ATA_RUNTIME_PM_OPTIMIZATION', 'ATA_RUNTIME_PM_TARGET', 'auto'),
+        runtime_pm_mode_from_raw($raw, 'ATA_RUNTIME_PM_MODE', 'auto'),
         'auto'
     );
 
@@ -866,13 +932,8 @@ function disks_settings_from_raw(array $raw): array
         'auto_execute_on_startup' => normalize_boolean($raw['DISKS_AUTO_EXECUTE_ON_STARTUP'] ?? null, 0),
         'disks_mode' => normalize_mode($raw['DISKS_MODE'] ?? 'automatic', 'automatic'),
         'sata_lpm_mode' => $sataMode,
-        // Legacy fields retained for compatibility with older UI builds.
-        'enable_sata_lpm_optimization' => $sataMode === 'disabled' ? 0 : 1,
-        'sata_lpm_policy' => $sataMode === 'disabled' ? 'min_power' : $sataMode,
         'disk_runtime_pm_mode' => $diskMode,
         'ata_runtime_pm_mode' => $ataMode,
-        'enable_disk_runtime_pm_optimization' => $diskMode === 'disabled' ? 0 : 1,
-        'enable_ata_runtime_pm_optimization' => $ataMode === 'disabled' ? 0 : 1,
         'disk_runtime_pm_targets' => $capabilities['disk_runtime_pm_targets'],
         'ata_runtime_pm_targets' => $capabilities['ata_runtime_pm_targets'],
     ];
@@ -906,7 +967,7 @@ function i2c_settings_from_raw(array $raw): array
     }
 
     $mode = constrain_runtime_pm_mode(
-        runtime_pm_mode_from_raw($raw, 'I2C_RUNTIME_PM_MODE', 'ENABLE_I2C_RUNTIME_PM_OPTIMIZATION', 'I2C_RUNTIME_PM_TARGET', 'on'),
+        runtime_pm_mode_from_raw($raw, 'I2C_RUNTIME_PM_MODE', 'on'),
         $capabilities['i2c_runtime_pm_targets'],
         'on'
     );
@@ -915,8 +976,6 @@ function i2c_settings_from_raw(array $raw): array
         'auto_execute_on_startup' => normalize_boolean($raw['I2C_AUTO_EXECUTE_ON_STARTUP'] ?? null, 0),
         'i2c_mode' => normalize_mode($raw['I2C_MODE'] ?? 'automatic', 'automatic'),
         'i2c_runtime_pm_mode' => $mode,
-        'enable_i2c_runtime_pm_optimization' => $mode === 'disabled' ? 0 : 1,
-        'i2c_runtime_pm_target' => $mode === 'disabled' ? 'on' : $mode,
         'i2c_runtime_pm_targets' => $capabilities['i2c_runtime_pm_targets'],
         'i2c_device_glob' => $deviceGlob,
     ];
@@ -926,10 +985,9 @@ function system_tunables_settings_from_raw(array $raw): array
 {
     $nmiTarget = normalize_int_range($raw['NMI_WATCHDOG_TARGET'] ?? 0, 0, 0, 1);
     $schedulerMode = power_aware_scheduler_mode_from_raw($raw);
-    $legacyVmWritebackCentisecs = normalize_int_range($raw['VM_WRITEBACK_TIMEOUT_CENTISECS'] ?? 1500, 1500, 100, 60000);
     $vmDirtyWritebackCentisecs = normalize_int_range(
-        $raw['VM_DIRTY_WRITEBACK_CENTISECS'] ?? $legacyVmWritebackCentisecs,
-        $legacyVmWritebackCentisecs,
+        $raw['VM_DIRTY_WRITEBACK_CENTISECS'] ?? 1500,
+        1500,
         100,
         60000
     );
@@ -954,9 +1012,6 @@ function system_tunables_settings_from_raw(array $raw): array
         'zfs_arc_min_percent' => $zfsArcMinPercent,
         'zfs_arc_max_percent' => $zfsArcMaxPercent,
         'power_aware_cpu_scheduler_mode' => $schedulerMode,
-        // Legacy fields retained for compatibility with older UI builds.
-        'enable_power_aware_cpu_scheduler_optimization' => 1,
-        'power_aware_cpu_scheduler_target' => $schedulerMode,
     ];
 }
 
@@ -973,6 +1028,115 @@ function get_link_caps_hex(string $device): string
 
     $value = preg_replace('/\s+/', '', trim((string)$output[0]));
     return preg_match('/^[0-9a-fA-F]{8}$/', $value) === 1 ? $value : '';
+}
+
+function get_dev_cap2_hex(string $device): string
+{
+    $output = [];
+    $code = 1;
+    $command = 'setpci -s ' . escapeshellarg($device) . ' CAP_EXP+24.l 2>/dev/null';
+    exec($command, $output, $code);
+
+    if ($code !== 0 || count($output) === 0) {
+        return '';
+    }
+
+    $value = preg_replace('/\s+/', '', trim((string)$output[0]));
+    return preg_match('/^[0-9a-fA-F]{8}$/', $value) === 1 ? $value : '';
+}
+
+function get_extended_capability_offset(string $device, int $wantedId): int
+{
+    $position = 0x100;
+
+    for ($hop = 0; $hop < 64 && $position >= 0x100 && $position < 0x1000; $hop++) {
+        $output = [];
+        $code = 1;
+        $command = 'setpci -s ' . escapeshellarg($device) . ' ' . escapeshellarg(sprintf('%x.l', $position)) . ' 2>/dev/null';
+        exec($command, $output, $code);
+
+        if ($code !== 0 || count($output) === 0) {
+            return -1;
+        }
+
+        $header = preg_replace('/\s+/', '', trim((string)$output[0]));
+        if (preg_match('/^[0-9a-fA-F]{8}$/', $header) !== 1) {
+            return -1;
+        }
+
+        $headerValue = hexdec($header);
+        $capabilityId = $headerValue & 0xffff;
+        $nextPosition = ($headerValue >> 20) & 0xfff;
+
+        if ($capabilityId === $wantedId) {
+            return $position;
+        }
+
+        if ($nextPosition === 0 || $nextPosition === $position) {
+            break;
+        }
+
+        $position = $nextPosition;
+    }
+
+    return 0;
+}
+
+function pci_clkpm_support_state_from_caps(string $capHex): string
+{
+    if ($capHex === '') {
+        return 'unknown';
+    }
+
+    return ((hexdec($capHex) >> 18) & 1) === 1 ? 'supported' : 'unsupported';
+}
+
+function pci_ltr_support_state(string $device): string
+{
+    $capHex = get_dev_cap2_hex($device);
+    if ($capHex === '') {
+        return 'unknown';
+    }
+
+    return ((hexdec($capHex) >> 11) & 1) === 1 ? 'supported' : 'unsupported';
+}
+
+function pci_l1ss_support_state(string $device): string
+{
+    $offset = get_extended_capability_offset($device, 0x1e);
+    if ($offset < 0) {
+        return 'unknown';
+    }
+
+    if ($offset === 0) {
+        return 'unsupported';
+    }
+
+    $output = [];
+    $code = 1;
+    $command = 'setpci -s ' . escapeshellarg($device) . ' ' . escapeshellarg(sprintf('%x.l', $offset + 4)) . ' 2>/dev/null';
+    exec($command, $output, $code);
+    if ($code !== 0 || count($output) === 0) {
+        return 'unknown';
+    }
+
+    $capHex = preg_replace('/\s+/', '', trim((string)$output[0]));
+    if (preg_match('/^[0-9a-fA-F]{8}$/', $capHex) !== 1) {
+        return 'unknown';
+    }
+
+    return (hexdec($capHex) & 0x0f) > 0 ? 'supported' : 'unsupported';
+}
+
+function pci_runtime_pm_support_state(string $device): string
+{
+    $normalized = normalize_pci_device_id($device);
+    if ($normalized === '') {
+        return 'unknown';
+    }
+
+    $path = '/sys/bus/pci/devices/' . $normalized . '/power/control';
+    return is_file($path) ? 'supported' : 'unsupported';
 }
 
 function get_parent_pci_device(string $device): string
@@ -1096,6 +1260,11 @@ function get_pci_devices(bool $forceAspmEndpoints = false, bool $forceAspmBridge
             }
         }
 
+        $clkpmSupport = pci_clkpm_support_state_from_caps($capHex);
+        $ltrSupport = pci_ltr_support_state($device);
+        $l1ssSupport = pci_l1ss_support_state($device);
+        $runtimePmSupport = pci_runtime_pm_support_state($device);
+
         $normalizedDeviceId = normalize_pci_device_id($device);
 
         $forceAspmForType = $type === 'bridge' ? $forceAspmBridges : $forceAspmEndpoints;
@@ -1107,6 +1276,10 @@ function get_pci_devices(bool $forceAspmEndpoints = false, bool $forceAspmBridge
             'aspm_state' => $aspmState,
             'aspm_runtime' => $runtimeAspmMap[$normalizedDeviceId] ?? ($runtimeAspmMap[$device] ?? 'unknown'),
             'aspm_supported' => $aspmSupported,
+            'clkpm_support' => $clkpmSupport,
+            'ltr_support' => $ltrSupport,
+            'l1ss_support' => $l1ssSupport,
+            'runtime_pm_support' => $runtimePmSupport,
             'selectable' => $aspmSupported || $forceAspmForType,
             'parent_id' => get_parent_pci_device($device),
         ];
@@ -1122,7 +1295,6 @@ function get_pci_devices(bool $forceAspmEndpoints = false, bool $forceAspmBridge
     }
 
     foreach ($devices as &$device) {
-        $device['depth'] = compute_depth($device['id'], $deviceMap);
         $device['topology_path'] = build_topology_path($device['id'], $deviceMap);
     }
     unset($device);
@@ -1145,6 +1317,36 @@ function normalize_pci_device_id(string $device): string
     return $normalized;
 }
 
+function normalize_aspm_runtime_segment(string $value): string
+{
+    $normalized = trim((string)preg_replace('/\s+/', ' ', $value));
+    if ($normalized === '') {
+        return '';
+    }
+
+    $hasL0s = preg_match('/\bL0s?\b/i', $normalized) === 1;
+    $hasL1 = preg_match('/\bL1\b/i', $normalized) === 1;
+
+    if ($hasL0s && $hasL1) {
+        return 'L0s & L1';
+    }
+
+    if ($hasL0s) {
+        return 'L0s';
+    }
+
+    if ($hasL1) {
+        return 'L1';
+    }
+
+    if (preg_match('/\bdisabled\b/i', $normalized) === 1) {
+        return 'disabled';
+    }
+
+    $normalized = (string)preg_replace('/\benabled\b/i', '', $normalized);
+    return trim((string)preg_replace('/\s+/', ' ', $normalized));
+}
+
 function simplify_aspm_runtime_text(string $line): string
 {
     $trimmed = trim($line);
@@ -1153,10 +1355,10 @@ function simplify_aspm_runtime_text(string $line): string
     }
 
     if (preg_match('/ASPM\s+([^;]+)/i', $trimmed, $matches) === 1) {
-        return trim($matches[1]);
+        return normalize_aspm_runtime_segment($matches[1]);
     }
 
-    return $trimmed;
+    return normalize_aspm_runtime_segment($trimmed);
 }
 
 function get_pcie_aspm_status_map(): array
@@ -1426,27 +1628,22 @@ if ($action === 'save_settings') {
         send_json(422, ['ok' => false, 'message' => 'BLACK_LIST cannot be empty. Add at least one pattern.']);
     }
 
-    $legacyForceAspmMode = normalize_force_aspm_mode(
-        $_POST['force_aspm_mode'] ?? (
-            normalize_boolean($_POST['force_aspm'] ?? ($_POST['manual_force_aspm'] ?? null), 0) === 1
-                ? ($_POST['manual_target_aspm_mode'] ?? 3)
-                : 0
-        ),
-        0
-    );
+    $forceAspmEndpointMode = normalize_force_aspm_mode($_POST['force_aspm_endpoint_mode'] ?? 0, 0);
+    $forceAspmBridgeMode = normalize_force_aspm_mode($_POST['force_aspm_bridge_mode'] ?? 0, 0);
 
-    $forceAspmEndpointMode = normalize_force_aspm_mode(
-        $_POST['force_aspm_endpoint_mode'] ?? $legacyForceAspmMode,
-        0
-    );
-    $forceAspmBridgeMode = normalize_force_aspm_mode(
-        $_POST['force_aspm_bridge_mode'] ?? $legacyForceAspmMode,
-        0
-    );
+    $manualDeviceOptions = normalize_manual_device_options_from_post((string)($_POST['manual_device_options'] ?? ''));
 
-    $compatForceAspmMode = $forceAspmEndpointMode === $forceAspmBridgeMode
-        ? (string)$forceAspmEndpointMode
-        : '0';
+    $manualSelectedDevices = [];
+    foreach ($manualDeviceOptions as $deviceId => $profile) {
+        $manualDeviceOptions[$deviceId] = normalize_manual_device_profile($profile);
+        if ($manualDeviceOptions[$deviceId]['enabled'] === 1) {
+            $manualSelectedDevices[] = $deviceId;
+        }
+    }
+    sort($manualSelectedDevices, SORT_STRING);
+
+    $manualSelectedDevicesCsv = implode(',', $manualSelectedDevices);
+    $manualDeviceOptionsRaw = encode_manual_device_options($manualDeviceOptions);
 
     $updates = [
         'BLACK_LIST' => implode(',', $blacklistItems),
@@ -1458,38 +1655,12 @@ if ($action === 'save_settings') {
         'ENABLE_LTR_OPTIMIZATION' => (string)normalize_boolean($_POST['enable_ltr_optimization'] ?? null, 1),
         'ENABLE_L1SS_OPTIMIZATION' => (string)normalize_boolean($_POST['enable_l1ss_optimization'] ?? null, 0),
         'ENABLE_PCI_RUNTIME_PM_OPTIMIZATION' => (string)normalize_boolean($_POST['enable_pci_runtime_pm_optimization'] ?? null, 1),
-        'FORCE_ASPM_MODE' => $compatForceAspmMode,
         'FORCE_ASPM_ENDPOINT_MODE' => (string)$forceAspmEndpointMode,
         'FORCE_ASPM_BRIDGE_MODE' => (string)$forceAspmBridgeMode,
-        'FORCE_ASPM' => '0',
-        'MANUAL_FORCE_ASPM' => '0',
-        'MANUAL_TARGET_ASPM_MODE' => '3',
-        'MANUAL_INCLUDE_ENDPOINTS' => (string)normalize_boolean($_POST['manual_include_endpoints'] ?? null, 1),
-        'MANUAL_INCLUDE_BRIDGES' => (string)normalize_boolean($_POST['manual_include_bridges'] ?? null, 1),
-        'MANUAL_SELECTED_DEVICES' => implode(',', normalize_csv_items((string)($_POST['manual_selected_devices'] ?? ''))),
+        'MANUAL_FORCE_INCOMPATIBLE' => (string)normalize_boolean($_POST['manual_force_incompatible'] ?? null, 0),
+        'MANUAL_SELECTED_DEVICES' => $manualSelectedDevicesCsv,
+        'MANUAL_DEVICE_OPTIONS' => $manualDeviceOptionsRaw,
     ];
-
-    $forceAspmEnabled = $forceAspmEndpointMode !== 0 || $forceAspmBridgeMode !== 0;
-    $updates['FORCE_ASPM'] = $forceAspmEnabled ? '1' : '0';
-    $updates['MANUAL_FORCE_ASPM'] = $forceAspmEnabled ? '1' : '0';
-    if (!$forceAspmEnabled) {
-        $updates['MANUAL_TARGET_ASPM_MODE'] = '3';
-    } elseif (
-        $forceAspmEndpointMode === $forceAspmBridgeMode
-        && in_array($forceAspmEndpointMode, [1, 2, 3], true)
-    ) {
-        $updates['MANUAL_TARGET_ASPM_MODE'] = (string)$forceAspmEndpointMode;
-    } else {
-        $updates['MANUAL_TARGET_ASPM_MODE'] = $updates['MAX_ASPM_LEVEL'];
-    }
-
-    if (
-        $updates['OPERATION_MODE'] === 'manual'
-        && $updates['MANUAL_INCLUDE_ENDPOINTS'] === '0'
-        && $updates['MANUAL_INCLUDE_BRIDGES'] === '0'
-    ) {
-        send_json(422, ['ok' => false, 'message' => 'Manual mode requires at least one of Endpoint or Bridge execution to be enabled.']);
-    }
 
     if ($updates['OPERATION_MODE'] === 'manual' && $updates['MANUAL_SELECTED_DEVICES'] === '') {
         send_json(422, ['ok' => false, 'message' => 'Manual mode requires at least one selected PCI device.']);
@@ -1509,38 +1680,19 @@ if ($action === 'save_settings') {
 
 if ($action === 'get_devices') {
     $pcie = pcie_settings_from_raw($rawSettings);
-    $legacyForceAspmMode = normalize_force_aspm_mode(
-        $_POST['force_aspm_mode']
-            ?? ($_GET['force_aspm_mode']
-                ?? (
-                    normalize_boolean(
-                        $_POST['force_aspm']
-                            ?? ($_GET['force_aspm']
-                                ?? ($_POST['manual_force_aspm']
-                                    ?? ($_GET['manual_force_aspm'] ?? null))),
-                        0
-                    ) === 1
-                        ? ($_POST['manual_target_aspm_mode'] ?? ($_GET['manual_target_aspm_mode'] ?? 3))
-                        : null
-                )),
-        (int)($pcie['force_aspm_mode'] ?? 0)
-    );
-
     $forceAspmEndpointMode = normalize_force_aspm_mode(
-        $_POST['force_aspm_endpoint_mode']
-            ?? ($_GET['force_aspm_endpoint_mode'] ?? $legacyForceAspmMode),
+        $_POST['force_aspm_endpoint_mode'] ?? null,
         (int)($pcie['force_aspm_endpoint_mode'] ?? 0)
     );
 
     $forceAspmBridgeMode = normalize_force_aspm_mode(
-        $_POST['force_aspm_bridge_mode']
-            ?? ($_GET['force_aspm_bridge_mode'] ?? $legacyForceAspmMode),
+        $_POST['force_aspm_bridge_mode'] ?? null,
         (int)($pcie['force_aspm_bridge_mode'] ?? 0)
     );
 
     send_json(200, [
         'ok' => true,
-        'devices' => get_pci_devices($forceAspmEndpointMode === 4, $forceAspmBridgeMode === 4),
+        'devices' => get_pci_devices($forceAspmEndpointMode !== 0, $forceAspmBridgeMode !== 0),
     ]);
 }
 
@@ -1594,12 +1746,8 @@ if ($action === 'save_cpu_settings') {
         ? 'powersave'
         : (count($availableGovernors) > 0 ? $availableGovernors[0] : 'disabled');
 
-    $legacyGovernorMode = normalize_boolean($_POST['enable_cpu_governor_optimization'] ?? null, $governorDefault === 'disabled' ? 0 : 1) === 1
-        ? normalize_governor($_POST['cpu_governor_target'] ?? $governorDefault, $governorDefault === 'disabled' ? 'powersave' : $governorDefault)
-        : 'disabled';
-
     $requestedGovernorMode = normalize_cpu_governor_mode(
-        $_POST['cpu_governor_mode'] ?? $legacyGovernorMode,
+        $_POST['cpu_governor_mode'] ?? $governorDefault,
         $governorDefault
     );
 
@@ -1611,28 +1759,16 @@ if ($action === 'save_cpu_settings') {
         $requestedGovernorMode = 'disabled';
     }
 
-    $legacyTurboMode = normalize_boolean($_POST['enable_cpu_turbo_optimization'] ?? null, 0) === 1
-        ? (normalize_boolean($_POST['cpu_turbo_target'] ?? null, 0) === 1 ? 'force_enabled' : 'force_disabled')
-        : 'disabled';
-
-    $requestedTurboMode = normalize_cpu_turbo_mode($_POST['cpu_turbo_mode'] ?? $legacyTurboMode, 'disabled');
+    $requestedTurboMode = normalize_cpu_turbo_mode($_POST['cpu_turbo_mode'] ?? 'disabled', 'disabled');
     if (!$cpuCapabilities['supports_cpu_turbo']) {
         $requestedTurboMode = 'disabled';
     }
-
-    $governorTarget = $requestedGovernorMode === 'disabled'
-        ? ($governorDefault === 'disabled' ? 'powersave' : $governorDefault)
-        : $requestedGovernorMode;
 
     $updates = [
         'CPU_MODE' => 'automatic',
         'CPU_AUTO_EXECUTE_ON_STARTUP' => (string)normalize_boolean($_POST['auto_execute_on_startup'] ?? null, 0),
         'CPU_GOVERNOR_MODE' => $requestedGovernorMode,
-        'ENABLE_CPU_GOVERNOR_OPTIMIZATION' => $requestedGovernorMode === 'disabled' ? '0' : '1',
-        'CPU_GOVERNOR_TARGET' => $governorTarget,
         'CPU_TURBO_MODE' => $requestedTurboMode,
-        'ENABLE_CPU_TURBO_OPTIMIZATION' => $requestedTurboMode === 'disabled' ? '0' : '1',
-        'CPU_TURBO_TARGET' => $requestedTurboMode === 'force_enabled' ? '1' : '0',
     ];
 
     $updatedRaw = array_merge($rawSettings, $updates);
@@ -1676,12 +1812,6 @@ if ($action === 'save_ethernet_settings') {
         'ENABLE_ETHERNET_WOL_OPTIMIZATION' => $wolEnable,
         'ETHERNET_WOL_TARGET' => $wolTarget,
         'ETHERNET_MANUAL_INTERFACES' => $manualInterfacesCsv,
-
-        // Keep compatibility keys synchronized with existing settings files.
-        'WOL_MODE' => $ethernetMode,
-        'ENABLE_WOL_OPTIMIZATION' => $wolEnable,
-        'WOL_TARGET' => $wolTarget,
-        'WOL_MANUAL_INTERFACES' => $manualInterfacesCsv,
     ];
 
     $updatedRaw = array_merge($rawSettings, $updates);
@@ -1702,59 +1832,6 @@ if ($action === 'run_ethernet_optimization') {
     send_json(200, ['ok' => true, 'message' => 'Ethernet optimization started.', 'log' => $logFile]);
 }
 
-// Compatibility aliases for older Wake on LAN page versions.
-if ($action === 'get_wol_settings') {
-    $ethernet = ethernet_settings_from_raw($rawSettings);
-    send_json(200, ['ok' => true, 'settings' => [
-        'wol_mode' => $ethernet['ethernet_mode'],
-        'enable_wol_optimization' => $ethernet['enable_ethernet_wol_optimization'],
-        'wol_target' => $ethernet['ethernet_wol_target'],
-        'wol_manual_interfaces_csv' => $ethernet['ethernet_manual_interfaces_csv'],
-    ]]);
-}
-
-if ($action === 'save_wol_settings') {
-    $ethernetMode = normalize_mode($_POST['wol_mode'] ?? 'automatic', 'automatic');
-    $manualInterfacesCsv = implode(',', normalize_csv_items((string)($_POST['wol_manual_interfaces_csv'] ?? '')));
-    $wolEnable = (string)normalize_boolean($_POST['enable_wol_optimization'] ?? null, 1);
-    $wolTarget = normalize_wol_target($_POST['wol_target'] ?? 'd', 'd');
-
-    $updates = [
-        'ETHERNET_MODE' => $ethernetMode,
-        'ETHERNET_MANUAL_INTERFACES' => $manualInterfacesCsv,
-        'ENABLE_ETHERNET_WOL_OPTIMIZATION' => $wolEnable,
-        'ETHERNET_WOL_TARGET' => $wolTarget,
-
-        'WOL_MODE' => $ethernetMode,
-        'ENABLE_WOL_OPTIMIZATION' => $wolEnable,
-        'WOL_TARGET' => $wolTarget,
-        'WOL_MANUAL_INTERFACES' => $manualInterfacesCsv,
-    ];
-
-    $updatedRaw = array_merge($rawSettings, $updates);
-    if (!write_raw_settings($configDir, $configFile, $defaults, $updatedRaw)) {
-        send_json(500, ['ok' => false, 'message' => 'Failed to save Wake on LAN settings.']);
-    }
-
-    $ethernet = ethernet_settings_from_raw($updatedRaw);
-    send_json(200, ['ok' => true, 'message' => 'Wake on LAN settings saved in Ethernet section.', 'settings' => [
-        'wol_mode' => $ethernet['ethernet_mode'],
-        'enable_wol_optimization' => $ethernet['enable_ethernet_wol_optimization'],
-        'wol_target' => $ethernet['ethernet_wol_target'],
-        'wol_manual_interfaces_csv' => $ethernet['ethernet_manual_interfaces_csv'],
-    ]]);
-}
-
-if ($action === 'run_wol_optimization') {
-    if (!is_executable($ethernetScriptFile)) {
-        send_json(500, ['ok' => false, 'message' => 'Ethernet optimizer script is missing or not executable.', 'script' => $ethernetScriptFile]);
-    }
-
-    $logFile = $logBaseDir . '/power.optimizer-ethernet.log';
-    run_in_background('/bin/bash ' . escapeshellarg($ethernetScriptFile), $logFile);
-    send_json(200, ['ok' => true, 'message' => 'Wake on LAN optimization started via Ethernet optimizer.', 'log' => $logFile]);
-}
-
 if ($action === 'get_disks_settings') {
     send_json(200, [
         'ok' => true,
@@ -1764,45 +1841,16 @@ if ($action === 'get_disks_settings') {
 }
 
 if ($action === 'save_disks_settings') {
-    $disksCapabilities = [
-        'disk_runtime_pm_targets' => ['auto'],
-        'ata_runtime_pm_targets' => ['auto'],
-    ];
-
-    $legacySataMode = normalize_boolean($_POST['enable_sata_lpm_optimization'] ?? null, 1) === 1
-        ? normalize_sata_policy($_POST['sata_lpm_policy'] ?? 'min_power', 'min_power')
-        : 'disabled';
-    $sataMode = normalize_sata_lpm_mode($_POST['sata_lpm_mode'] ?? $legacySataMode, 'min_power');
-
-    $legacyDiskMode = normalize_boolean($_POST['enable_disk_runtime_pm_optimization'] ?? null, 1) === 1
-        ? normalize_disks_runtime_pm_mode($_POST['disk_runtime_pm_target'] ?? 'auto', 'auto')
-        : 'disabled';
-    $legacyAtaMode = normalize_boolean($_POST['enable_ata_runtime_pm_optimization'] ?? null, 1) === 1
-        ? normalize_disks_runtime_pm_mode($_POST['ata_runtime_pm_target'] ?? 'auto', 'auto')
-        : 'disabled';
-
-    $diskMode = normalize_disks_runtime_pm_mode(
-        $_POST['disk_runtime_pm_mode'] ?? $legacyDiskMode,
-        'auto'
-    );
-    $ataMode = normalize_disks_runtime_pm_mode(
-        $_POST['ata_runtime_pm_mode'] ?? $legacyAtaMode,
-        'auto'
-    );
+    $sataMode = normalize_sata_lpm_mode($_POST['sata_lpm_mode'] ?? 'min_power', 'min_power');
+    $diskMode = normalize_disks_runtime_pm_mode($_POST['disk_runtime_pm_mode'] ?? 'auto', 'auto');
+    $ataMode = normalize_disks_runtime_pm_mode($_POST['ata_runtime_pm_mode'] ?? 'auto', 'auto');
 
     $updates = [
         'DISKS_MODE' => 'automatic',
         'DISKS_AUTO_EXECUTE_ON_STARTUP' => (string)normalize_boolean($_POST['auto_execute_on_startup'] ?? null, 0),
         'SATA_LPM_MODE' => $sataMode,
-        // Legacy keys retained and synchronized for compatibility with older script/UI versions.
-        'ENABLE_SATA_LPM_OPTIMIZATION' => $sataMode === 'disabled' ? '0' : '1',
-        'SATA_LPM_POLICY' => $sataMode === 'disabled' ? 'min_power' : $sataMode,
         'DISK_RUNTIME_PM_MODE' => $diskMode,
-        'ENABLE_DISK_RUNTIME_PM_OPTIMIZATION' => $diskMode === 'disabled' ? '0' : '1',
-        'DISK_RUNTIME_PM_TARGET' => $diskMode === 'disabled' ? 'auto' : $diskMode,
         'ATA_RUNTIME_PM_MODE' => $ataMode,
-        'ENABLE_ATA_RUNTIME_PM_OPTIMIZATION' => $ataMode === 'disabled' ? '0' : '1',
-        'ATA_RUNTIME_PM_TARGET' => $ataMode === 'disabled' ? 'auto' : $ataMode,
     ];
 
     $updatedRaw = array_merge($rawSettings, $updates);
@@ -1892,11 +1940,8 @@ if ($action === 'save_i2c_settings') {
         $deviceGlob = 'i2c-*';
     }
 
-    $legacyI2cMode = normalize_boolean($_POST['enable_i2c_runtime_pm_optimization'] ?? null, 1) === 1
-        ? normalize_runtime_target($_POST['i2c_runtime_pm_target'] ?? 'on', 'on')
-        : 'disabled';
     $i2cMode = constrain_runtime_pm_mode(
-        normalize_runtime_pm_mode($_POST['i2c_runtime_pm_mode'] ?? $legacyI2cMode, 'on'),
+        normalize_runtime_pm_mode($_POST['i2c_runtime_pm_mode'] ?? 'on', 'on'),
         $i2cCapabilities['i2c_runtime_pm_targets'],
         'on'
     );
@@ -1905,8 +1950,6 @@ if ($action === 'save_i2c_settings') {
         'I2C_MODE' => 'automatic',
         'I2C_AUTO_EXECUTE_ON_STARTUP' => (string)normalize_boolean($_POST['auto_execute_on_startup'] ?? null, 0),
         'I2C_RUNTIME_PM_MODE' => $i2cMode,
-        'ENABLE_I2C_RUNTIME_PM_OPTIMIZATION' => $i2cMode === 'disabled' ? '0' : '1',
-        'I2C_RUNTIME_PM_TARGET' => $i2cMode === 'disabled' ? 'on' : $i2cMode,
         'I2C_DEVICE_GLOB' => $deviceGlob,
     ];
 
@@ -1938,23 +1981,17 @@ if ($action === 'get_system_tunables_settings') {
 }
 
 if ($action === 'save_system_tunables_settings') {
-    $disableNmiWatchdog = array_key_exists('disable_nmi_watchdog', $_POST)
-        ? normalize_boolean($_POST['disable_nmi_watchdog'] ?? null, 1)
-        : (normalize_int_range($_POST['nmi_watchdog_target'] ?? 0, 0, 0, 1) === 0 ? 1 : 0);
+    $disableNmiWatchdog = normalize_boolean($_POST['disable_nmi_watchdog'] ?? null, 1);
 
-    $legacySchedulerMode = normalize_boolean($_POST['enable_power_aware_cpu_scheduler_optimization'] ?? null, 1) === 1
-        ? normalize_power_aware_scheduler_mode($_POST['power_aware_cpu_scheduler_target'] ?? 2, 2)
-        : 0;
     $schedulerMode = normalize_power_aware_scheduler_mode(
-        $_POST['power_aware_cpu_scheduler_mode'] ?? $legacySchedulerMode,
+        $_POST['power_aware_cpu_scheduler_mode'] ?? 2,
         2
     );
 
     $vmWritebackEnabled = normalize_boolean($_POST['enable_vm_writeback_timeout_optimization'] ?? null, 1);
-    $legacyVmWritebackCentisecs = normalize_int_range($_POST['vm_writeback_timeout_centisecs'] ?? 1500, 1500, 100, 60000);
     $vmDirtyWritebackCentisecs = normalize_int_range(
-        $_POST['vm_dirty_writeback_centisecs'] ?? $legacyVmWritebackCentisecs,
-        $legacyVmWritebackCentisecs,
+        $_POST['vm_dirty_writeback_centisecs'] ?? 1500,
+        1500,
         100,
         60000
     );
@@ -1979,12 +2016,7 @@ if ($action === 'save_system_tunables_settings') {
         'VFS_CACHE_MAX_AGE' => (string)$vfsCacheMaxAge,
         'ZFS_ARC_MIN_PERCENT' => (string)$zfsArcMinPercent,
         'ZFS_ARC_MAX_PERCENT' => (string)$zfsArcMaxPercent,
-        // Keep compatibility key synchronized with existing settings files.
-        'VM_WRITEBACK_TIMEOUT_CENTISECS' => (string)$vmDirtyWritebackCentisecs,
         'POWER_AWARE_CPU_SCHEDULER_MODE' => (string)$schedulerMode,
-        // Legacy keys retained and synchronized for compatibility with older script/UI versions.
-        'ENABLE_POWER_AWARE_CPU_SCHEDULER_OPTIMIZATION' => '1',
-        'POWER_AWARE_CPU_SCHEDULER_TARGET' => (string)$schedulerMode,
     ];
 
     $updatedRaw = array_merge($rawSettings, $updates);

@@ -36,21 +36,30 @@ DEFAULT_ENABLE_L1SS_OPTIMIZATION=0
 ENABLE_L1SS_OPTIMIZATION=$DEFAULT_ENABLE_L1SS_OPTIMIZATION
 DEFAULT_ENABLE_PCI_RUNTIME_PM_OPTIMIZATION=0
 ENABLE_PCI_RUNTIME_PM_OPTIMIZATION=$DEFAULT_ENABLE_PCI_RUNTIME_PM_OPTIMIZATION
-DEFAULT_FORCE_ASPM_MODE=0
-FORCE_ASPM_MODE=$DEFAULT_FORCE_ASPM_MODE
 DEFAULT_FORCE_ASPM_ENDPOINT_MODE=0
 FORCE_ASPM_ENDPOINT_MODE=$DEFAULT_FORCE_ASPM_ENDPOINT_MODE
 DEFAULT_FORCE_ASPM_BRIDGE_MODE=0
 FORCE_ASPM_BRIDGE_MODE=$DEFAULT_FORCE_ASPM_BRIDGE_MODE
-DEFAULT_FORCE_ASPM=0
-FORCE_ASPM=$DEFAULT_FORCE_ASPM
-DEFAULT_MANUAL_TARGET_ASPM_MODE=3
-MANUAL_TARGET_ASPM_MODE=$DEFAULT_MANUAL_TARGET_ASPM_MODE
-DEFAULT_MANUAL_INCLUDE_ENDPOINTS=1
-MANUAL_INCLUDE_ENDPOINTS=$DEFAULT_MANUAL_INCLUDE_ENDPOINTS
-DEFAULT_MANUAL_INCLUDE_BRIDGES=1
-MANUAL_INCLUDE_BRIDGES=$DEFAULT_MANUAL_INCLUDE_BRIDGES
+DEFAULT_MANUAL_FORCE_INCOMPATIBLE=0
+MANUAL_FORCE_INCOMPATIBLE=$DEFAULT_MANUAL_FORCE_INCOMPATIBLE
 MANUAL_SELECTED_DEVICES=()
+
+declare -A MANUAL_DEVICE_ENABLED
+declare -A MANUAL_DEVICE_ENABLE_ASPM
+declare -A MANUAL_DEVICE_ASPM_MODE
+declare -A MANUAL_DEVICE_ENABLE_CLKPM
+declare -A MANUAL_DEVICE_ENABLE_LTR
+declare -A MANUAL_DEVICE_ENABLE_L1SS
+declare -A MANUAL_DEVICE_ENABLE_RUNTIME_PM
+
+MANUAL_DEVICE_OPTION_COUNT=0
+MANUAL_PROFILE_ENABLED=1
+MANUAL_PROFILE_ENABLE_ASPM=1
+MANUAL_PROFILE_ASPM_MODE=3
+MANUAL_PROFILE_ENABLE_CLKPM=1
+MANUAL_PROFILE_ENABLE_LTR=1
+MANUAL_PROFILE_ENABLE_L1SS=0
+MANUAL_PROFILE_ENABLE_RUNTIME_PM=0
 
 RUN_CONTEXT=""
 RUN_ACTIVE=0
@@ -89,6 +98,19 @@ trim_whitespace() {
     echo "$value"
 }
 
+normalize_pci_device_identifier() {
+    local value
+    value=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+    value=$(trim_whitespace "$value")
+
+    if [[ "$value" =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]]; then
+        echo "$value"
+        return 0
+    fi
+
+    echo ""
+}
+
 default_blacklist_csv() {
     local IFS=,
     echo "${DEFAULT_BLACK_LIST[*]}"
@@ -102,26 +124,25 @@ bool_from_string() {
 }
 
 aspm_mode_from_string() {
-    local fallback=${2:-$DEFAULT_MANUAL_TARGET_ASPM_MODE}
+    local fallback=${2:-3}
 
     case "${1,,}" in
-        0|disabled|off) echo 0 ;;
-        1|l0|l0s) echo 1 ;;
-        2|l1) echo 2 ;;
-        3|l0s+l1|both|auto) echo 3 ;;
+        0) echo 0 ;;
+        1) echo 1 ;;
+        2) echo 2 ;;
+        3) echo 3 ;;
         *) echo "$fallback" ;;
     esac
 }
 
 force_aspm_mode_from_string() {
-    local fallback=${2:-$DEFAULT_FORCE_ASPM_MODE}
+    local fallback=${2:-0}
 
     case "${1,,}" in
-        0|disabled|off) echo 0 ;;
-        1|l0|l0s) echo 1 ;;
-        2|l1) echo 2 ;;
-        3|l0s+l1|both|auto) echo 3 ;;
-        4|manual-only|manual_only|manualonly|manual) echo 4 ;;
+        0) echo 0 ;;
+        1) echo 1 ;;
+        2) echo 2 ;;
+        3) echo 3 ;;
         *) echo "$fallback" ;;
     esac
 }
@@ -154,6 +175,119 @@ csv_to_array() {
     done
 }
 
+manual_profile_defaults() {
+    MANUAL_PROFILE_ENABLED=0
+    MANUAL_PROFILE_ENABLE_ASPM=1
+    MANUAL_PROFILE_ASPM_MODE=3
+    MANUAL_PROFILE_ENABLE_CLKPM=1
+    MANUAL_PROFILE_ENABLE_LTR=1
+    MANUAL_PROFILE_ENABLE_L1SS=0
+    MANUAL_PROFILE_ENABLE_RUNTIME_PM=0
+}
+
+clear_manual_device_options() {
+    MANUAL_DEVICE_ENABLED=()
+    MANUAL_DEVICE_ENABLE_ASPM=()
+    MANUAL_DEVICE_ASPM_MODE=()
+    MANUAL_DEVICE_ENABLE_CLKPM=()
+    MANUAL_DEVICE_ENABLE_LTR=()
+    MANUAL_DEVICE_ENABLE_L1SS=()
+    MANUAL_DEVICE_ENABLE_RUNTIME_PM=()
+    MANUAL_DEVICE_OPTION_COUNT=0
+}
+
+set_manual_device_profile() {
+    local device_id=$1
+    local enabled=$2
+    local enable_aspm=$3
+    local aspm_mode=$4
+    local enable_clkpm=$5
+    local enable_ltr=$6
+    local enable_l1ss=$7
+    local enable_runtime_pm=${8:-0}
+    local normalized_aspm_mode normalized_enable_aspm
+
+    [[ -n "${MANUAL_DEVICE_ENABLED[$device_id]+x}" ]] || ((MANUAL_DEVICE_OPTION_COUNT++))
+
+    MANUAL_DEVICE_ENABLED[$device_id]=$(bool_from_string "$enabled")
+
+    normalized_enable_aspm=$(bool_from_string "$enable_aspm")
+    normalized_aspm_mode=$(aspm_mode_from_string "$aspm_mode" 3)
+    if [[ "$normalized_aspm_mode" -lt 0 || "$normalized_aspm_mode" -gt 3 ]]; then
+        normalized_aspm_mode=3
+    fi
+
+    if [[ "$normalized_enable_aspm" -eq 0 || "$normalized_aspm_mode" -eq 0 ]]; then
+        MANUAL_DEVICE_ENABLE_ASPM[$device_id]=0
+        MANUAL_DEVICE_ASPM_MODE[$device_id]=0
+    else
+        MANUAL_DEVICE_ENABLE_ASPM[$device_id]=1
+        MANUAL_DEVICE_ASPM_MODE[$device_id]=$normalized_aspm_mode
+    fi
+
+    MANUAL_DEVICE_ENABLE_CLKPM[$device_id]=$(bool_from_string "$enable_clkpm")
+    MANUAL_DEVICE_ENABLE_LTR[$device_id]=$(bool_from_string "$enable_ltr")
+    MANUAL_DEVICE_ENABLE_L1SS[$device_id]=$(bool_from_string "$enable_l1ss")
+    MANUAL_DEVICE_ENABLE_RUNTIME_PM[$device_id]=$(bool_from_string "$enable_runtime_pm")
+}
+
+parse_manual_device_options() {
+    local raw=$1
+    local entry device_id
+    local IFS=';'
+
+    clear_manual_device_options
+
+    [[ -n "$raw" ]] || return 0
+
+    for entry in $raw; do
+        local fields
+        local enabled enable_aspm aspm_mode enable_clkpm enable_ltr enable_l1ss enable_runtime_pm
+
+        entry=$(trim_whitespace "$entry")
+        [[ -n "$entry" ]] || continue
+
+        IFS=',' read -r -a fields <<< "$entry"
+        [[ "${#fields[@]}" -eq 8 ]] || continue
+
+        device_id=$(normalize_pci_device_identifier "${fields[0]}")
+        [[ -n "$device_id" ]] || continue
+
+        enabled=$(trim_whitespace "${fields[1]}")
+        enable_aspm=$(trim_whitespace "${fields[2]}")
+        aspm_mode=$(trim_whitespace "${fields[3]}")
+        enable_clkpm=$(trim_whitespace "${fields[4]}")
+        enable_ltr=$(trim_whitespace "${fields[5]}")
+        enable_l1ss=$(trim_whitespace "${fields[6]}")
+        enable_runtime_pm=$(trim_whitespace "${fields[7]}")
+
+        set_manual_device_profile "$device_id" "$enabled" "$enable_aspm" "$aspm_mode" "$enable_clkpm" "$enable_ltr" "$enable_l1ss" "$enable_runtime_pm"
+    done
+}
+
+load_manual_profile_for_device() {
+    local dev_id full_id
+
+    manual_profile_defaults
+
+    full_id=$(normalize_pci_device_identifier "$1")
+    [[ -n "$full_id" ]] || return 0
+
+    if [[ -n "${MANUAL_DEVICE_ENABLED[$full_id]+x}" ]]; then
+        dev_id=$full_id
+    else
+        return 0
+    fi
+
+    MANUAL_PROFILE_ENABLED=${MANUAL_DEVICE_ENABLED[$dev_id]:-1}
+    MANUAL_PROFILE_ENABLE_ASPM=${MANUAL_DEVICE_ENABLE_ASPM[$dev_id]:-1}
+    MANUAL_PROFILE_ASPM_MODE=${MANUAL_DEVICE_ASPM_MODE[$dev_id]:-3}
+    MANUAL_PROFILE_ENABLE_CLKPM=${MANUAL_DEVICE_ENABLE_CLKPM[$dev_id]:-1}
+    MANUAL_PROFILE_ENABLE_LTR=${MANUAL_DEVICE_ENABLE_LTR[$dev_id]:-1}
+    MANUAL_PROFILE_ENABLE_L1SS=${MANUAL_DEVICE_ENABLE_L1SS[$dev_id]:-0}
+    MANUAL_PROFILE_ENABLE_RUNTIME_PM=${MANUAL_DEVICE_ENABLE_RUNTIME_PM[$dev_id]:-0}
+}
+
 array_contains() {
     local needle=$1
     shift
@@ -167,10 +301,25 @@ array_contains() {
 
 is_manual_selected_device() {
     local dev=$1
-    local short_dev=${dev#0000:}
+    load_manual_profile_for_device "$dev"
 
-    array_contains "$dev" "${MANUAL_SELECTED_DEVICES[@]}" && return 0
-    array_contains "$short_dev" "${MANUAL_SELECTED_DEVICES[@]}" && return 0
+    if [[ "$MANUAL_PROFILE_ENABLED" -eq 1 ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+manual_has_runtime_pm_targets() {
+    local dev
+
+    for dev in "${MANUAL_SELECTED_DEVICES[@]}"; do
+        load_manual_profile_for_device "$dev"
+        if [[ "$MANUAL_PROFILE_ENABLED" -eq 1 && "$MANUAL_PROFILE_ENABLE_RUNTIME_PM" -eq 1 ]]; then
+            return 0
+        fi
+    done
+
     return 1
 }
 
@@ -220,15 +369,11 @@ ensure_config_file() {
             printf 'ENABLE_LTR_OPTIMIZATION="%s"\n' "$DEFAULT_ENABLE_LTR_OPTIMIZATION"
             printf 'ENABLE_L1SS_OPTIMIZATION="%s"\n' "$DEFAULT_ENABLE_L1SS_OPTIMIZATION"
             printf 'ENABLE_PCI_RUNTIME_PM_OPTIMIZATION="%s"\n' "$DEFAULT_ENABLE_PCI_RUNTIME_PM_OPTIMIZATION"
-            printf 'FORCE_ASPM_MODE="%s"\n' "$DEFAULT_FORCE_ASPM_MODE"
             printf 'FORCE_ASPM_ENDPOINT_MODE="%s"\n' "$DEFAULT_FORCE_ASPM_ENDPOINT_MODE"
             printf 'FORCE_ASPM_BRIDGE_MODE="%s"\n' "$DEFAULT_FORCE_ASPM_BRIDGE_MODE"
-            printf 'FORCE_ASPM="%s"\n' "$DEFAULT_FORCE_ASPM"
-            printf 'MANUAL_FORCE_ASPM="%s"\n' "$DEFAULT_FORCE_ASPM"
-            printf 'MANUAL_TARGET_ASPM_MODE="%s"\n' "$DEFAULT_MANUAL_TARGET_ASPM_MODE"
-            printf 'MANUAL_INCLUDE_ENDPOINTS="%s"\n' "$DEFAULT_MANUAL_INCLUDE_ENDPOINTS"
-            printf 'MANUAL_INCLUDE_BRIDGES="%s"\n' "$DEFAULT_MANUAL_INCLUDE_BRIDGES"
+            printf 'MANUAL_FORCE_INCOMPATIBLE="%s"\n' "$DEFAULT_MANUAL_FORCE_INCOMPATIBLE"
             printf 'MANUAL_SELECTED_DEVICES=""\n'
+            printf 'MANUAL_DEVICE_OPTIONS=""\n'
         } > "$PLUGIN_CONFIG_FILE" || return 1
     else
         grep -q '^BLACK_LIST=' "$PLUGIN_CONFIG_FILE" || printf 'BLACK_LIST="%s"\n' "$(default_blacklist_csv)" >> "$PLUGIN_CONFIG_FILE"
@@ -240,15 +385,11 @@ ensure_config_file() {
         grep -q '^ENABLE_LTR_OPTIMIZATION=' "$PLUGIN_CONFIG_FILE" || printf 'ENABLE_LTR_OPTIMIZATION="%s"\n' "$DEFAULT_ENABLE_LTR_OPTIMIZATION" >> "$PLUGIN_CONFIG_FILE"
         grep -q '^ENABLE_L1SS_OPTIMIZATION=' "$PLUGIN_CONFIG_FILE" || printf 'ENABLE_L1SS_OPTIMIZATION="%s"\n' "$DEFAULT_ENABLE_L1SS_OPTIMIZATION" >> "$PLUGIN_CONFIG_FILE"
         grep -q '^ENABLE_PCI_RUNTIME_PM_OPTIMIZATION=' "$PLUGIN_CONFIG_FILE" || printf 'ENABLE_PCI_RUNTIME_PM_OPTIMIZATION="%s"\n' "$DEFAULT_ENABLE_PCI_RUNTIME_PM_OPTIMIZATION" >> "$PLUGIN_CONFIG_FILE"
-        grep -q '^FORCE_ASPM_MODE=' "$PLUGIN_CONFIG_FILE" || printf 'FORCE_ASPM_MODE="%s"\n' "$DEFAULT_FORCE_ASPM_MODE" >> "$PLUGIN_CONFIG_FILE"
         grep -q '^FORCE_ASPM_ENDPOINT_MODE=' "$PLUGIN_CONFIG_FILE" || printf 'FORCE_ASPM_ENDPOINT_MODE="%s"\n' "$DEFAULT_FORCE_ASPM_ENDPOINT_MODE" >> "$PLUGIN_CONFIG_FILE"
         grep -q '^FORCE_ASPM_BRIDGE_MODE=' "$PLUGIN_CONFIG_FILE" || printf 'FORCE_ASPM_BRIDGE_MODE="%s"\n' "$DEFAULT_FORCE_ASPM_BRIDGE_MODE" >> "$PLUGIN_CONFIG_FILE"
-        grep -q '^FORCE_ASPM=' "$PLUGIN_CONFIG_FILE" || printf 'FORCE_ASPM="%s"\n' "$DEFAULT_FORCE_ASPM" >> "$PLUGIN_CONFIG_FILE"
-        grep -q '^MANUAL_FORCE_ASPM=' "$PLUGIN_CONFIG_FILE" || printf 'MANUAL_FORCE_ASPM="%s"\n' "$DEFAULT_FORCE_ASPM" >> "$PLUGIN_CONFIG_FILE"
-        grep -q '^MANUAL_TARGET_ASPM_MODE=' "$PLUGIN_CONFIG_FILE" || printf 'MANUAL_TARGET_ASPM_MODE="%s"\n' "$DEFAULT_MANUAL_TARGET_ASPM_MODE" >> "$PLUGIN_CONFIG_FILE"
-        grep -q '^MANUAL_INCLUDE_ENDPOINTS=' "$PLUGIN_CONFIG_FILE" || printf 'MANUAL_INCLUDE_ENDPOINTS="%s"\n' "$DEFAULT_MANUAL_INCLUDE_ENDPOINTS" >> "$PLUGIN_CONFIG_FILE"
-        grep -q '^MANUAL_INCLUDE_BRIDGES=' "$PLUGIN_CONFIG_FILE" || printf 'MANUAL_INCLUDE_BRIDGES="%s"\n' "$DEFAULT_MANUAL_INCLUDE_BRIDGES" >> "$PLUGIN_CONFIG_FILE"
+        grep -q '^MANUAL_FORCE_INCOMPATIBLE=' "$PLUGIN_CONFIG_FILE" || printf 'MANUAL_FORCE_INCOMPATIBLE="%s"\n' "$DEFAULT_MANUAL_FORCE_INCOMPATIBLE" >> "$PLUGIN_CONFIG_FILE"
         grep -q '^MANUAL_SELECTED_DEVICES=' "$PLUGIN_CONFIG_FILE" || printf 'MANUAL_SELECTED_DEVICES=""\n' >> "$PLUGIN_CONFIG_FILE"
+        grep -q '^MANUAL_DEVICE_OPTIONS=' "$PLUGIN_CONFIG_FILE" || printf 'MANUAL_DEVICE_OPTIONS=""\n' >> "$PLUGIN_CONFIG_FILE"
     fi
 
     return 0
@@ -256,11 +397,12 @@ ensure_config_file() {
 
 load_settings_from_config() {
     local raw_line raw_value
-    local parsed entry raw_auto raw_mode raw_force raw_force_mode raw_target
+    local parsed entry raw_auto raw_mode
     local raw_force_endpoint_mode raw_force_bridge_mode
     local raw_max_aspm raw_enable_aspm raw_enable_clkpm raw_enable_ltr raw_enable_l1ss
     local raw_enable_pci_runtime_pm
-    local raw_manual_endpoints raw_manual_bridges raw_manual_devices
+    local raw_manual_force_incompatible raw_manual_devices raw_manual_device_options
+    local selected_device normalized_device
 
     BLACK_LIST=("${DEFAULT_BLACK_LIST[@]}")
 
@@ -309,27 +451,42 @@ load_settings_from_config() {
     raw_enable_pci_runtime_pm=$(read_config_value "ENABLE_PCI_RUNTIME_PM_OPTIMIZATION" "$DEFAULT_ENABLE_PCI_RUNTIME_PM_OPTIMIZATION")
     ENABLE_PCI_RUNTIME_PM_OPTIMIZATION=$(bool_from_string "$raw_enable_pci_runtime_pm")
 
-    raw_force=$(read_config_value "FORCE_ASPM" "$(read_config_value "MANUAL_FORCE_ASPM" "$DEFAULT_FORCE_ASPM")")
-    raw_target=$(read_config_value "MANUAL_TARGET_ASPM_MODE" "$DEFAULT_MANUAL_TARGET_ASPM_MODE")
-    raw_force_mode=$(read_config_value "FORCE_ASPM_MODE" "$(if [[ "$(bool_from_string "$raw_force")" -eq 1 ]]; then echo "$raw_target"; else echo "$DEFAULT_FORCE_ASPM_MODE"; fi)")
-    raw_force_endpoint_mode=$(read_config_value "FORCE_ASPM_ENDPOINT_MODE" "$raw_force_mode")
-    raw_force_bridge_mode=$(read_config_value "FORCE_ASPM_BRIDGE_MODE" "$raw_force_mode")
+    raw_force_endpoint_mode=$(read_config_value "FORCE_ASPM_ENDPOINT_MODE" "$DEFAULT_FORCE_ASPM_ENDPOINT_MODE")
+    raw_force_bridge_mode=$(read_config_value "FORCE_ASPM_BRIDGE_MODE" "$DEFAULT_FORCE_ASPM_BRIDGE_MODE")
 
-    FORCE_ASPM_MODE=$(force_aspm_mode_from_string "$raw_force_mode" "$DEFAULT_FORCE_ASPM_MODE")
-    FORCE_ASPM_ENDPOINT_MODE=$(force_aspm_mode_from_string "$raw_force_endpoint_mode" "$FORCE_ASPM_MODE")
-    FORCE_ASPM_BRIDGE_MODE=$(force_aspm_mode_from_string "$raw_force_bridge_mode" "$FORCE_ASPM_MODE")
-    FORCE_ASPM=$([[ "$FORCE_ASPM_ENDPOINT_MODE" -eq 0 && "$FORCE_ASPM_BRIDGE_MODE" -eq 0 ]] && echo 0 || echo 1)
+    FORCE_ASPM_ENDPOINT_MODE=$(force_aspm_mode_from_string "$raw_force_endpoint_mode" "$DEFAULT_FORCE_ASPM_ENDPOINT_MODE")
+    FORCE_ASPM_BRIDGE_MODE=$(force_aspm_mode_from_string "$raw_force_bridge_mode" "$DEFAULT_FORCE_ASPM_BRIDGE_MODE")
 
-    MANUAL_TARGET_ASPM_MODE=$(aspm_mode_from_string "$raw_target" "$DEFAULT_MANUAL_TARGET_ASPM_MODE")
-
-    raw_manual_endpoints=$(read_config_value "MANUAL_INCLUDE_ENDPOINTS" "$DEFAULT_MANUAL_INCLUDE_ENDPOINTS")
-    MANUAL_INCLUDE_ENDPOINTS=$(bool_from_string "$raw_manual_endpoints")
-
-    raw_manual_bridges=$(read_config_value "MANUAL_INCLUDE_BRIDGES" "$DEFAULT_MANUAL_INCLUDE_BRIDGES")
-    MANUAL_INCLUDE_BRIDGES=$(bool_from_string "$raw_manual_bridges")
+    raw_manual_force_incompatible=$(read_config_value "MANUAL_FORCE_INCOMPATIBLE" "$DEFAULT_MANUAL_FORCE_INCOMPATIBLE")
+    MANUAL_FORCE_INCOMPATIBLE=$(bool_from_string "$raw_manual_force_incompatible")
 
     raw_manual_devices=$(read_config_value "MANUAL_SELECTED_DEVICES" "")
     csv_to_array "$raw_manual_devices"
+
+    raw_manual_device_options=$(read_config_value "MANUAL_DEVICE_OPTIONS" "")
+    parse_manual_device_options "$raw_manual_device_options"
+
+    for selected_device in "${MANUAL_SELECTED_DEVICES[@]}"; do
+        normalized_device=$(normalize_pci_device_identifier "$selected_device")
+        [[ -n "$normalized_device" ]] || continue
+
+        if [[ -z "${MANUAL_DEVICE_ENABLED[$normalized_device]+x}" ]]; then
+            set_manual_device_profile "$normalized_device" 1 1 3 1 1 0 0
+        else
+            MANUAL_DEVICE_ENABLED[$normalized_device]=1
+        fi
+    done
+
+    MANUAL_SELECTED_DEVICES=()
+    for selected_device in "${!MANUAL_DEVICE_ENABLED[@]}"; do
+        [[ "${MANUAL_DEVICE_ENABLED[$selected_device]}" -eq 1 ]] || continue
+        MANUAL_SELECTED_DEVICES+=("$selected_device")
+    done
+
+    if [[ "${#MANUAL_SELECTED_DEVICES[@]}" -gt 0 ]]; then
+        IFS=$'\n' MANUAL_SELECTED_DEVICES=($(printf '%s\n' "${MANUAL_SELECTED_DEVICES[@]}" | sort))
+        unset IFS
+    fi
 }
 
 ensure_state_dir() {
@@ -572,17 +729,6 @@ resolve_target_mode_for_device() {
         return 0
     fi
 
-    if [[ ( "$mode_status" -eq 2 || "$mode_status" -eq 3 ) && "$force_mode" -eq 4 ]]; then
-        if [[ "$OPERATION_MODE" != "manual" ]]; then
-            return "$mode_status"
-        fi
-
-        ASPM_TARGET_MODE=$MAX_ASPM_LEVEL
-        CLKPM_SUPPORTED=0
-        ASPM_TARGET_MODE=$(clamp_aspm_mode_by_max "$ASPM_TARGET_MODE")
-        return 0
-    fi
-
     if [[ "$force_mode" -ne 0 && ( "$mode_status" -eq 2 || "$mode_status" -eq 3 ) ]]; then
         ASPM_TARGET_MODE=$force_mode
         CLKPM_SUPPORTED=0
@@ -618,17 +764,17 @@ init_counters() {
     br_unknown=0
 
     ep_clkpm_enabled=0
-    ep_clkpm_supported_disabled=0
+    ep_clkpm_disabled=0
     ep_clkpm_unsupported=0
     ep_clkpm_unknown=0
 
     br_clkpm_enabled=0
-    br_clkpm_supported_disabled=0
+    br_clkpm_disabled=0
     br_clkpm_unsupported=0
     br_clkpm_unknown=0
 
     ep_ltr_enabled=0
-    ep_ltr_supported_disabled=0
+    ep_ltr_disabled=0
     ep_ltr_unsupported=0
     ep_ltr_unknown=0
     ep_ltr_changed=0
@@ -636,7 +782,7 @@ init_counters() {
     ep_ltr_enable_fail=0
 
     br_ltr_enabled=0
-    br_ltr_supported_disabled=0
+    br_ltr_disabled=0
     br_ltr_unsupported=0
     br_ltr_unknown=0
     br_ltr_changed=0
@@ -644,7 +790,7 @@ init_counters() {
     br_ltr_enable_fail=0
 
     ep_l1ss_enabled=0
-    ep_l1ss_supported_disabled=0
+    ep_l1ss_disabled=0
     ep_l1ss_unsupported=0
     ep_l1ss_absent=0
     ep_l1ss_unknown=0
@@ -653,7 +799,7 @@ init_counters() {
     ep_l1ss_enable_fail=0
 
     br_l1ss_enabled=0
-    br_l1ss_supported_disabled=0
+    br_l1ss_disabled=0
     br_l1ss_unsupported=0
     br_l1ss_absent=0
     br_l1ss_unknown=0
@@ -796,10 +942,9 @@ apply_link_power_settings() {
 aspm_mode_label() {
     case "$1" in
         0) echo "disabled" ;;
-        1) echo "L0" ;;
+        1) echo "L0s" ;;
         2) echo "L1" ;;
-        3) echo "L0+L1" ;;
-        4) echo "manual-only" ;;
+        3) echo "L0s+L1" ;;
         *) echo "unknown" ;;
     esac
 }
@@ -979,6 +1124,7 @@ apply_pci_runtime_pm_all() {
 apply_pci_runtime_pm_manual_selected() {
     local dev path resolved_path
     local selected_total=0
+    local runtime_enabled_selected=0
     local resolved_targets=0
     local writable_targets=0
     local skipped_missing=0
@@ -990,6 +1136,13 @@ apply_pci_runtime_pm_manual_selected() {
 
     for dev in "${MANUAL_SELECTED_DEVICES[@]}"; do
         ((selected_total++))
+
+        load_manual_profile_for_device "$dev"
+        if [[ "$MANUAL_PROFILE_ENABLED" -ne 1 || "$MANUAL_PROFILE_ENABLE_RUNTIME_PM" -ne 1 ]]; then
+            continue
+        fi
+
+        ((runtime_enabled_selected++))
 
         path="/sys/bus/pci/devices/${dev}/power/control"
         resolved_path="$path"
@@ -1023,7 +1176,7 @@ apply_pci_runtime_pm_manual_selected() {
         fi
     done
 
-    echo "  PCI runtime PM summary (manual): selected=${selected_total} resolved=${resolved_targets} writable=${writable_targets} missing=${skipped_missing} skipped_not_writable=${skipped_not_writable} write_successes=${write_successes} write_failures=${write_failures}"
+    echo "  PCI runtime PM summary (manual): selected=${selected_total} runtime_pm_enabled=${runtime_enabled_selected} resolved=${resolved_targets} writable=${writable_targets} missing=${skipped_missing} skipped_not_writable=${skipped_not_writable} write_successes=${write_successes} write_failures=${write_failures}"
 }
 
 record_path_diag() {
@@ -1051,19 +1204,19 @@ record_path_diag() {
     if [[ "$scope" == "endpoint" ]]; then
         case "$clkpm_state" in
             enabled) ((ep_clkpm_enabled++)) ;;
-            supported-disabled) ((ep_clkpm_supported_disabled++)) ;;
+            supported-disabled) ((ep_clkpm_disabled++)) ;;
             unsupported) ((ep_clkpm_unsupported++)) ;;
             *) ((ep_clkpm_unknown++)) ;;
         esac
         case "$ltr_state" in
             enabled) ((ep_ltr_enabled++)) ;;
-            supported-disabled) ((ep_ltr_supported_disabled++)) ;;
+            supported-disabled) ((ep_ltr_disabled++)) ;;
             unsupported) ((ep_ltr_unsupported++)) ;;
             *) ((ep_ltr_unknown++)) ;;
         esac
         case "$l1ss_state" in
             enabled) ((ep_l1ss_enabled++)) ;;
-            supported-disabled) ((ep_l1ss_supported_disabled++)) ;;
+            supported-disabled) ((ep_l1ss_disabled++)) ;;
             unsupported) ((ep_l1ss_unsupported++)) ;;
             absent) ((ep_l1ss_absent++)) ;;
             *) ((ep_l1ss_unknown++)) ;;
@@ -1071,19 +1224,19 @@ record_path_diag() {
     else
         case "$clkpm_state" in
             enabled) ((br_clkpm_enabled++)) ;;
-            supported-disabled) ((br_clkpm_supported_disabled++)) ;;
+            supported-disabled) ((br_clkpm_disabled++)) ;;
             unsupported) ((br_clkpm_unsupported++)) ;;
             *) ((br_clkpm_unknown++)) ;;
         esac
         case "$ltr_state" in
             enabled) ((br_ltr_enabled++)) ;;
-            supported-disabled) ((br_ltr_supported_disabled++)) ;;
+            supported-disabled) ((br_ltr_disabled++)) ;;
             unsupported) ((br_ltr_unsupported++)) ;;
             *) ((br_ltr_unknown++)) ;;
         esac
         case "$l1ss_state" in
             enabled) ((br_l1ss_enabled++)) ;;
-            supported-disabled) ((br_l1ss_supported_disabled++)) ;;
+            supported-disabled) ((br_l1ss_disabled++)) ;;
             unsupported) ((br_l1ss_unsupported++)) ;;
             absent) ((br_l1ss_absent++)) ;;
             *) ((br_l1ss_unknown++)) ;;
@@ -1099,6 +1252,9 @@ run_auto_optimize() {
     local run_context=$1
     local full_desc mode_status
     local startup_mode=0
+    local base_enable_aspm base_enable_clkpm base_enable_ltr base_enable_l1ss
+    local base_max_aspm
+    local base_force_endpoint_mode base_force_bridge_mode
 
     [[ "$run_context" == "$PLUGIN_MODE_STARTUP_AUTO_OPTIMIZE" ]] && startup_mode=1
 
@@ -1126,13 +1282,25 @@ run_auto_optimize() {
     ENABLE_L1SS=$ENABLE_L1SS_OPTIMIZATION
     ENABLE_PCI_RUNTIME_PM=$ENABLE_PCI_RUNTIME_PM_OPTIMIZATION
 
-    if [[ "$OPERATION_MODE" == "manual" && "${#MANUAL_SELECTED_DEVICES[@]}" -eq 0 ]]; then
-        echo "Manual mode is selected, but no PCI devices were selected."
-        return 0
+    base_enable_aspm=$ENABLE_ASPM
+    base_enable_clkpm=$ENABLE_CLKPM
+    base_enable_ltr=$ENABLE_LTR
+    base_enable_l1ss=$ENABLE_L1SS
+    base_max_aspm=$MAX_ASPM_LEVEL
+    base_force_endpoint_mode=$FORCE_ASPM_ENDPOINT_MODE
+    base_force_bridge_mode=$FORCE_ASPM_BRIDGE_MODE
+
+    if [[ "$OPERATION_MODE" == "manual" ]]; then
+        # Manual mode uses per-device profiles only.
+        if manual_has_runtime_pm_targets; then
+            ENABLE_PCI_RUNTIME_PM=1
+        else
+            ENABLE_PCI_RUNTIME_PM=0
+        fi
     fi
 
-    if [[ "$OPERATION_MODE" == "manual" && "$MANUAL_INCLUDE_ENDPOINTS" -eq 0 && "$MANUAL_INCLUDE_BRIDGES" -eq 0 ]]; then
-        echo "Manual mode is selected, but both endpoint and bridge execution are disabled."
+    if [[ "$OPERATION_MODE" == "manual" && "${#MANUAL_SELECTED_DEVICES[@]}" -eq 0 ]]; then
+        echo "Manual mode is selected, but no PCI devices were selected."
         return 0
     fi
 
@@ -1153,7 +1321,8 @@ run_auto_optimize() {
     echo "Force ASPM mode on unsupported endpoints: $(aspm_mode_label "$FORCE_ASPM_ENDPOINT_MODE")"
     echo "Force ASPM mode on unsupported bridges: $(aspm_mode_label "$FORCE_ASPM_BRIDGE_MODE")"
     if [[ "$OPERATION_MODE" == "manual" ]]; then
-        echo "Manual Settings: include_endpoints=${MANUAL_INCLUDE_ENDPOINTS} include_bridges=${MANUAL_INCLUDE_BRIDGES} selected_devices=${#MANUAL_SELECTED_DEVICES[@]}"
+        echo "Manual Settings: force_incompatible=${MANUAL_FORCE_INCOMPATIBLE} selected_devices=${#MANUAL_SELECTED_DEVICES[@]}"
+        echo "Manual mode note: global auto optimization toggles, max ASPM limit, and force ASPM settings are ignored. Runtime PM uses per-device manual settings."
     fi
 
     # --- PASS 1: ENDPOINTS (Bottom-Up) ---
@@ -1162,9 +1331,28 @@ run_auto_optimize() {
         full_desc=$(lspci -D -s "$dev")
 
         if [[ "$OPERATION_MODE" == "manual" ]]; then
-            [[ "$MANUAL_INCLUDE_ENDPOINTS" -eq 1 ]] || continue
             is_manual_selected_device "$dev" || continue
+
+            ENABLE_ASPM=$MANUAL_PROFILE_ENABLE_ASPM
+            ENABLE_CLKPM=$MANUAL_PROFILE_ENABLE_CLKPM
+            ENABLE_LTR=$MANUAL_PROFILE_ENABLE_LTR
+            ENABLE_L1SS=$MANUAL_PROFILE_ENABLE_L1SS
+            MAX_ASPM_LEVEL=$MANUAL_PROFILE_ASPM_MODE
+            if [[ "$MANUAL_FORCE_INCOMPATIBLE" -eq 1 && "$ENABLE_ASPM" -eq 1 ]]; then
+                FORCE_ASPM_ENDPOINT_MODE=$MAX_ASPM_LEVEL
+            else
+                FORCE_ASPM_ENDPOINT_MODE=0
+            fi
+            FORCE_ASPM_BRIDGE_MODE=0
         else
+            ENABLE_ASPM=$base_enable_aspm
+            ENABLE_CLKPM=$base_enable_clkpm
+            ENABLE_LTR=$base_enable_ltr
+            ENABLE_L1SS=$base_enable_l1ss
+            MAX_ASPM_LEVEL=$base_max_aspm
+            FORCE_ASPM_ENDPOINT_MODE=$base_force_endpoint_mode
+            FORCE_ASPM_BRIDGE_MODE=$base_force_bridge_mode
+
             if is_blacklisted "$full_desc"; then
                 ((ep_blacklisted++))
                 echo "  Skipping blacklisted endpoint: $full_desc"
@@ -1290,9 +1478,28 @@ run_auto_optimize() {
         full_desc=$(lspci -D -s "$dev")
 
         if [[ "$OPERATION_MODE" == "manual" ]]; then
-            [[ "$MANUAL_INCLUDE_BRIDGES" -eq 1 ]] || continue
             is_manual_selected_device "$dev" || continue
+
+            ENABLE_ASPM=$MANUAL_PROFILE_ENABLE_ASPM
+            ENABLE_CLKPM=$MANUAL_PROFILE_ENABLE_CLKPM
+            ENABLE_LTR=$MANUAL_PROFILE_ENABLE_LTR
+            ENABLE_L1SS=$MANUAL_PROFILE_ENABLE_L1SS
+            MAX_ASPM_LEVEL=$MANUAL_PROFILE_ASPM_MODE
+            FORCE_ASPM_ENDPOINT_MODE=0
+            if [[ "$MANUAL_FORCE_INCOMPATIBLE" -eq 1 && "$ENABLE_ASPM" -eq 1 ]]; then
+                FORCE_ASPM_BRIDGE_MODE=$MAX_ASPM_LEVEL
+            else
+                FORCE_ASPM_BRIDGE_MODE=0
+            fi
         else
+            ENABLE_ASPM=$base_enable_aspm
+            ENABLE_CLKPM=$base_enable_clkpm
+            ENABLE_LTR=$base_enable_ltr
+            ENABLE_L1SS=$base_enable_l1ss
+            MAX_ASPM_LEVEL=$base_max_aspm
+            FORCE_ASPM_ENDPOINT_MODE=$base_force_endpoint_mode
+            FORCE_ASPM_BRIDGE_MODE=$base_force_bridge_mode
+
             if is_blacklisted "$full_desc"; then
                 ((br_blacklisted++))
                 echo "  Skipping blacklisted bridge: $full_desc"
@@ -1430,15 +1637,15 @@ run_auto_optimize() {
     echo "Bridges:   total=${br_total} changed=${br_changed} already=${br_already} blacklisted=${br_blacklisted} no_pcie_cap=${br_no_pcie_cap} unsupported=${br_unsupported} lnkctl_read_fail=${br_lnkctl_read_fail} write_not_stick=${br_write_not_stick} write_fail=${br_write_fail} verify_fail=${br_verify_fail} unknown=${br_unknown}"
     echo
     echo "--- Power Path Diagnostics ---"
-    echo "Endpoints CLKPM: enabled=${ep_clkpm_enabled} supported_disabled=${ep_clkpm_supported_disabled} unsupported=${ep_clkpm_unsupported} unknown=${ep_clkpm_unknown}"
-    echo "Endpoints LTR:   enabled=${ep_ltr_enabled} supported_disabled=${ep_ltr_supported_disabled} unsupported=${ep_ltr_unsupported} unknown=${ep_ltr_unknown}"
+    echo "Endpoints CLKPM: enabled=${ep_clkpm_enabled} disabled=${ep_clkpm_disabled} unsupported=${ep_clkpm_unsupported} unknown=${ep_clkpm_unknown}"
+    echo "Endpoints LTR:   enabled=${ep_ltr_enabled} disabled=${ep_ltr_disabled} unsupported=${ep_ltr_unsupported} unknown=${ep_ltr_unknown}"
     echo "Endpoints LTR programming: changed=${ep_ltr_changed} already=${ep_ltr_already} failed=${ep_ltr_enable_fail}"
-    echo "Endpoints L1SS:  enabled=${ep_l1ss_enabled} supported_disabled=${ep_l1ss_supported_disabled} unsupported=${ep_l1ss_unsupported} absent=${ep_l1ss_absent} unknown=${ep_l1ss_unknown}"
+    echo "Endpoints L1SS:  enabled=${ep_l1ss_enabled} disabled=${ep_l1ss_disabled} unsupported=${ep_l1ss_unsupported} absent=${ep_l1ss_absent} unknown=${ep_l1ss_unknown}"
     echo "Endpoints L1SS programming: changed=${ep_l1ss_changed} already=${ep_l1ss_already} failed=${ep_l1ss_enable_fail}"
-    echo "Bridges CLKPM:   enabled=${br_clkpm_enabled} supported_disabled=${br_clkpm_supported_disabled} unsupported=${br_clkpm_unsupported} unknown=${br_clkpm_unknown}"
-    echo "Bridges LTR:     enabled=${br_ltr_enabled} supported_disabled=${br_ltr_supported_disabled} unsupported=${br_ltr_unsupported} unknown=${br_ltr_unknown}"
+    echo "Bridges CLKPM:   enabled=${br_clkpm_enabled} disabled=${br_clkpm_disabled} unsupported=${br_clkpm_unsupported} unknown=${br_clkpm_unknown}"
+    echo "Bridges LTR:     enabled=${br_ltr_enabled} disabled=${br_ltr_disabled} unsupported=${br_ltr_unsupported} unknown=${br_ltr_unknown}"
     echo "Bridges LTR programming:   changed=${br_ltr_changed} already=${br_ltr_already} failed=${br_ltr_enable_fail}"
-    echo "Bridges L1SS:    enabled=${br_l1ss_enabled} supported_disabled=${br_l1ss_supported_disabled} unsupported=${br_l1ss_unsupported} absent=${br_l1ss_absent} unknown=${br_l1ss_unknown}"
+    echo "Bridges L1SS:    enabled=${br_l1ss_enabled} disabled=${br_l1ss_disabled} unsupported=${br_l1ss_unsupported} absent=${br_l1ss_absent} unknown=${br_l1ss_unknown}"
     echo "Bridges L1SS programming: changed=${br_l1ss_changed} already=${br_l1ss_already} failed=${br_l1ss_enable_fail}"
 
     echo -e "\n--- Optimization Complete ---"
