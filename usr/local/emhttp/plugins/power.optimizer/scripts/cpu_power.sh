@@ -40,13 +40,6 @@ bool_from_string() {
     esac
 }
 
-governor_from_string() {
-    case "${1,,}" in
-        powersave|ondemand|performance|conservative|schedutil) echo "${1,,}" ;;
-        *) echo "powersave" ;;
-    esac
-}
-
 governor_mode_from_string() {
     case "${1,,}" in
         disabled|off) echo "disabled" ;;
@@ -64,27 +57,8 @@ turbo_mode_from_string() {
     esac
 }
 
-legacy_enable_governor=$(bool_from_string "$(read_config_value "ENABLE_CPU_GOVERNOR_OPTIMIZATION" "1")")
-legacy_enable_turbo=$(bool_from_string "$(read_config_value "ENABLE_CPU_TURBO_OPTIMIZATION" "0")")
-legacy_governor_target=$(governor_from_string "$(read_config_value "CPU_GOVERNOR_TARGET" "powersave")")
-legacy_turbo_target=$(bool_from_string "$(read_config_value "CPU_TURBO_TARGET" "0")")
-
-legacy_governor_mode="disabled"
-if [[ "$legacy_enable_governor" -eq 1 ]]; then
-    legacy_governor_mode="$legacy_governor_target"
-fi
-
-legacy_turbo_mode="disabled"
-if [[ "$legacy_enable_turbo" -eq 1 ]]; then
-    if [[ "$legacy_turbo_target" -eq 1 ]]; then
-        legacy_turbo_mode="force_enabled"
-    else
-        legacy_turbo_mode="force_disabled"
-    fi
-fi
-
-governor_mode=$(governor_mode_from_string "$(read_config_value "CPU_GOVERNOR_MODE" "$legacy_governor_mode")")
-turbo_mode=$(turbo_mode_from_string "$(read_config_value "CPU_TURBO_MODE" "$legacy_turbo_mode")")
+governor_mode=$(governor_mode_from_string "$(read_config_value "CPU_GOVERNOR_MODE" "powersave")")
+turbo_mode=$(turbo_mode_from_string "$(read_config_value "CPU_TURBO_MODE" "disabled")")
 cpu_auto_startup=$(bool_from_string "$(read_config_value "CPU_AUTO_EXECUTE_ON_STARTUP" "0")")
 
 echo "CPU setting CPU_AUTO_EXECUTE_ON_STARTUP=${cpu_auto_startup}."

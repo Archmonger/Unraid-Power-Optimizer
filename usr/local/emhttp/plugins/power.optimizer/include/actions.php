@@ -678,7 +678,7 @@ function current_cpu_governor_label(): string
     return 'mixed (' . implode(', ', $governors) . ')';
 }
 
-function average_cpu_ghz(): ?float
+function cpu_frequency_ghz_samples(): array
 {
     $samples = [];
 
@@ -709,11 +709,25 @@ function average_cpu_ghz(): ?float
         }
     }
 
+    return $samples;
+}
+
+function cpu_frequency_ghz_stats(): array
+{
+    $samples = cpu_frequency_ghz_samples();
     if (count($samples) === 0) {
-        return null;
+        return [
+            'average' => null,
+            'min' => null,
+            'max' => null,
+        ];
     }
 
-    return array_sum($samples) / count($samples);
+    return [
+        'average' => array_sum($samples) / count($samples),
+        'min' => min($samples),
+        'max' => max($samples),
+    ];
 }
 
 function cpu_c_state_time_totals_us(): array
@@ -748,15 +762,70 @@ function cpu_c_state_time_totals_us(): array
     return $totals;
 }
 
+function cpu_c_state_time_totals_us_by_package(): array
+{
+    $byPackage = [];
+    $timeFiles = glob('/sys/devices/system/cpu/cpu*/cpuidle/state*/time');
+    if ($timeFiles === false) {
+        return $byPackage;
+    }
+
+    foreach ($timeFiles as $timePath) {
+        if (preg_match('#/cpu([0-9]+)/cpuidle/state[^/]+/time$#', $timePath, $matches) !== 1) {
+            continue;
+        }
+
+        $cpuIndex = (int)$matches[1];
+        $packagePath = '/sys/devices/system/cpu/cpu' . $cpuIndex . '/topology/physical_package_id';
+        $packageValue = read_trimmed_file_value($packagePath);
+        $packageId = preg_match('/^-?\d+$/', (string)$packageValue) === 1
+            ? (int)$packageValue
+            : $cpuIndex;
+
+        $timeValue = read_trimmed_file_value($timePath);
+        if ($timeValue === null || preg_match('/^\d+$/', $timeValue) !== 1) {
+            continue;
+        }
+
+        $namePath = dirname($timePath) . '/name';
+        $stateName = read_trimmed_file_value($namePath) ?? basename(dirname($timePath));
+        $stateName = strtoupper(preg_replace('/\s+/', '', $stateName));
+        if ($stateName === '') {
+            continue;
+        }
+
+        $packageKey = (string)$packageId;
+        if (!isset($byPackage[$packageKey])) {
+            $byPackage[$packageKey] = [];
+        }
+        if (!isset($byPackage[$packageKey][$stateName])) {
+            $byPackage[$packageKey][$stateName] = 0;
+        }
+
+        $byPackage[$packageKey][$stateName] += (int)$timeValue;
+    }
+
+    foreach ($byPackage as &$totals) {
+        ksort($totals, SORT_STRING);
+    }
+    unset($totals);
+
+    ksort($byPackage, SORT_NATURAL);
+    return $byPackage;
+}
+
 function cpu_live_statistics(): array
 {
-    $averageGhz = average_cpu_ghz();
+    $frequencyStats = cpu_frequency_ghz_stats();
 
     return [
         'captured_at_unix_ms' => (int)round(microtime(true) * 1000),
         'current_governor' => current_cpu_governor_label(),
-        'average_cpu_ghz' => $averageGhz === null ? null : round($averageGhz, 3),
+        'average_cpu_ghz' => $frequencyStats['average'] === null ? null : round((float)$frequencyStats['average'], 3),
+        'min_cpu_ghz' => $frequencyStats['min'] === null ? null : round((float)$frequencyStats['min'], 3),
+        'max_cpu_ghz' => $frequencyStats['max'] === null ? null : round((float)$frequencyStats['max'], 3),
         'c_state_time_totals_us' => cpu_c_state_time_totals_us(),
+        'c_state_time_totals_us_by_package' => cpu_c_state_time_totals_us_by_package(),
     ];
 }
 

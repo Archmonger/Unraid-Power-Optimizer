@@ -42,13 +42,15 @@ Title="CPU"
                 <div class="stat-value" id="cpu-live-governor">unknown</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">System Average CPU Frequency</div>
+                <div class="stat-label">System Avg/Min/Max CPU Frequency</div>
                 <div class="stat-value" id="cpu-live-average-ghz">n/a</div>
             </div>
         </div>
-        <div class="stat-block">
-            <div class="stat-label">CPU C-State Residency (Supported States)</div>
-            <pre class="stat-pre" id="cpu-live-cstates">Waiting for baseline sample...</pre>
+        <div class="cstate-grid" id="cpu-live-cstates-container">
+            <div class="stat-block">
+                <div class="stat-label">CPU 0 C-State Statistics</div>
+                <pre class="stat-pre">Waiting for baseline sample...</pre>
+            </div>
         </div>
     </div>
 
@@ -123,6 +125,15 @@ Title="CPU"
 .stat-block {
     margin-top: 10px;
 }
+.cstate-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+}
+.cstate-grid .stat-block {
+    margin-top: 0;
+}
 .stat-pre {
     margin: 0;
     border: 1px solid #e5e7eb;
@@ -152,7 +163,7 @@ Title="CPU"
     const liveStatsPanel = document.getElementById('cpu-live-stats-panel');
     const liveGovernor = document.getElementById('cpu-live-governor');
     const liveAverageGhz = document.getElementById('cpu-live-average-ghz');
-    const liveCStates = document.getElementById('cpu-live-cstates');
+    const liveCStatesContainer = document.getElementById('cpu-live-cstates-container');
     const statusMessage = document.getElementById('cpu-status-message');
     const status = document.getElementById('cpu-status');
 
@@ -162,7 +173,7 @@ Title="CPU"
         savedSettingsSignature: '',
         availableGovernors: [],
         supportsCpuTurbo: false,
-        previousCStateTotalsUs: null
+        previousCStateTotalsUsByPackage: null
     };
 
     let executionLogTimer = null;
@@ -307,42 +318,127 @@ Title="CPU"
         });
     }
 
+    function renderCStateUsageBlocks(blocks) {
+        if (!liveCStatesContainer) {
+            return;
+        }
+
+        liveCStatesContainer.innerHTML = '';
+        blocks.forEach(function (block) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'stat-block';
+
+            const label = document.createElement('div');
+            label.className = 'stat-label';
+            label.textContent = block.title;
+
+            const pre = document.createElement('pre');
+            pre.className = 'stat-pre';
+            pre.textContent = block.body;
+
+            wrapper.appendChild(label);
+            wrapper.appendChild(pre);
+            liveCStatesContainer.appendChild(wrapper);
+        });
+    }
+
+    function clonePackageTotalsMap(source) {
+        const result = {};
+        Object.keys(source || {}).forEach(function (packageId) {
+            result[packageId] = Object.assign({}, source[packageId] || {});
+        });
+        return result;
+    }
+
+    function normalizePackageCStateTotals(stats) {
+        const byPackage = (stats && stats.c_state_time_totals_us_by_package) || {};
+        const packageIds = Object.keys(byPackage);
+
+        if (packageIds.length > 0) {
+            return byPackage;
+        }
+
+        const aggregate = (stats && stats.c_state_time_totals_us) || {};
+        if (Object.keys(aggregate).length > 0) {
+            return { '0': aggregate };
+        }
+
+        return {};
+    }
+
     function renderLiveStatistics(stats) {
         const governorText = String((stats && stats.current_governor) || 'unknown');
         liveGovernor.textContent = governorText;
 
-        if (stats && typeof stats.average_cpu_ghz === 'number' && isFinite(stats.average_cpu_ghz)) {
-            liveAverageGhz.textContent = stats.average_cpu_ghz.toFixed(3) + ' GHz';
+        const averageGhz = stats && typeof stats.average_cpu_ghz === 'number' && isFinite(stats.average_cpu_ghz)
+            ? stats.average_cpu_ghz
+            : null;
+        const minGhz = stats && typeof stats.min_cpu_ghz === 'number' && isFinite(stats.min_cpu_ghz)
+            ? stats.min_cpu_ghz
+            : null;
+        const maxGhz = stats && typeof stats.max_cpu_ghz === 'number' && isFinite(stats.max_cpu_ghz)
+            ? stats.max_cpu_ghz
+            : null;
+
+        if (averageGhz !== null && minGhz !== null && maxGhz !== null) {
+            liveAverageGhz.textContent = averageGhz.toFixed(3) + ' GHz / ' + minGhz.toFixed(3) + ' GHz / ' + maxGhz.toFixed(3) + ' GHz';
+        } else if (averageGhz !== null) {
+            liveAverageGhz.textContent = averageGhz.toFixed(3) + ' GHz / n/a / n/a';
         } else {
             liveAverageGhz.textContent = 'n/a';
         }
 
-        const currentTotals = (stats && stats.c_state_time_totals_us) || {};
-        const stateNames = Object.keys(currentTotals);
+        const currentTotalsByPackage = normalizePackageCStateTotals(stats);
+        const packageIds = Object.keys(currentTotalsByPackage).sort(function (left, right) {
+            return Number(left) - Number(right);
+        });
 
-        if (stateNames.length === 0) {
-            liveCStates.textContent = 'C-state statistics are unavailable on this system.';
-            state.previousCStateTotalsUs = null;
+        if (packageIds.length === 0) {
+            renderCStateUsageBlocks([
+                {
+                    title: 'CPU 0 C-State Statistics',
+                    body: 'C-state statistics are unavailable on this system.'
+                }
+            ]);
+            state.previousCStateTotalsUsByPackage = null;
             return;
         }
 
-        if (state.previousCStateTotalsUs === null) {
-            liveCStates.textContent = 'Collecting baseline sample...';
-            state.previousCStateTotalsUs = Object.assign({}, currentTotals);
+        if (state.previousCStateTotalsUsByPackage === null) {
+            renderCStateUsageBlocks(packageIds.map(function (packageId) {
+                return {
+                    title: 'CPU ' + packageId + ' C-State Statistics',
+                    body: 'Collecting baseline sample...'
+                };
+            }));
+            state.previousCStateTotalsUsByPackage = clonePackageTotalsMap(currentTotalsByPackage);
             return;
         }
 
-        const percentages = computeCStatePercentages(currentTotals, state.previousCStateTotalsUs);
-        state.previousCStateTotalsUs = Object.assign({}, currentTotals);
+        const blocks = [];
+        packageIds.forEach(function (packageId) {
+            const currentTotals = currentTotalsByPackage[packageId] || {};
+            const previousTotals = (state.previousCStateTotalsUsByPackage || {})[packageId] || {};
+            const percentages = computeCStatePercentages(currentTotals, previousTotals);
 
-        if (percentages.length === 0) {
-            liveCStates.textContent = 'No measurable C-state residency change in this interval.';
-            return;
-        }
+            if (percentages.length === 0) {
+                blocks.push({
+                    title: 'CPU ' + packageId + ' C-State Statistics',
+                    body: 'No measurable C-state residency change in this interval.'
+                });
+                return;
+            }
 
-        liveCStates.textContent = percentages.map(function (entry) {
-            return entry.state + ': ' + entry.percent.toFixed(1) + '%';
-        }).join('\n');
+            blocks.push({
+                title: 'CPU ' + packageId + ' C-State Statistics',
+                body: percentages.map(function (entry) {
+                    return entry.state + ': ' + entry.percent.toFixed(1) + '%';
+                }).join('\n')
+            });
+        });
+
+        renderCStateUsageBlocks(blocks);
+        state.previousCStateTotalsUsByPackage = clonePackageTotalsMap(currentTotalsByPackage);
     }
 
     async function loadLiveStatistics() {
