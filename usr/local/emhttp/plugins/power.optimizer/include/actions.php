@@ -428,12 +428,6 @@ function normalize_runtime_target($value, string $default = 'auto'): string
     return in_array($normalized, ['auto', 'on'], true) ? $normalized : $default;
 }
 
-function normalize_usb_wakeup_target($value, string $default = 'disabled'): string
-{
-    $normalized = strtolower(trim((string)$value));
-    return in_array($normalized, ['enabled', 'disabled'], true) ? $normalized : $default;
-}
-
 function normalize_usb_runtime_pm_target($value, string $default = 'auto'): string
 {
     $normalized = strtolower(trim((string)$value));
@@ -1058,7 +1052,6 @@ function usb_settings_from_raw(array $raw): array
         'enable_usb_autosuspend_optimization' => normalize_boolean($raw['ENABLE_USB_AUTOSUSPEND_OPTIMIZATION'] ?? null, 1),
         'usb_runtime_pm_target' => normalize_usb_runtime_pm_target($raw['USB_RUNTIME_PM_TARGET'] ?? 'auto', 'auto'),
         'enable_usb_wakeup_optimization' => normalize_boolean($raw['ENABLE_USB_WAKEUP_OPTIMIZATION'] ?? null, 1),
-        'usb_wakeup_target' => normalize_usb_wakeup_target($raw['USB_WAKEUP_TARGET'] ?? 'disabled', 'disabled'),
         'usb_device_glob' => $deviceGlob,
     ];
 }
@@ -2019,13 +2012,15 @@ if ($action === 'save_usb_settings') {
         $deviceGlob = '*';
     }
 
+    $enableUsbWakeupOptimization = normalize_boolean($_POST['enable_usb_wakeup_optimization'] ?? null, 1);
+
     $updates = [
         'USB_MODE' => 'automatic',
         'USB_AUTO_EXECUTE_ON_STARTUP' => (string)normalize_boolean($_POST['auto_execute_on_startup'] ?? null, 0),
         'ENABLE_USB_AUTOSUSPEND_OPTIMIZATION' => (string)normalize_boolean($_POST['enable_usb_autosuspend_optimization'] ?? null, 1),
         'USB_RUNTIME_PM_TARGET' => normalize_usb_runtime_pm_target($_POST['usb_runtime_pm_target'] ?? 'auto', 'auto'),
-        'ENABLE_USB_WAKEUP_OPTIMIZATION' => (string)normalize_boolean($_POST['enable_usb_wakeup_optimization'] ?? null, 1),
-        'USB_WAKEUP_TARGET' => normalize_usb_wakeup_target($_POST['usb_wakeup_target'] ?? 'disabled', 'disabled'),
+        'ENABLE_USB_WAKEUP_OPTIMIZATION' => (string)$enableUsbWakeupOptimization,
+        'USB_WAKEUP_TARGET' => 'disabled',
         'USB_DEVICE_GLOB' => $deviceGlob,
     ];
 

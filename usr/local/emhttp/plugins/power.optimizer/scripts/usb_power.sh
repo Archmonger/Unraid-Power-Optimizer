@@ -48,13 +48,6 @@ runtime_target_from_string() {
     esac
 }
 
-wakeup_target_from_string() {
-    case "${1,,}" in
-        enabled|enable|on|1|true|yes) echo "enabled" ;;
-        *) echo "disabled" ;;
-    esac
-}
-
 apply_usb_runtime_pm() {
     local usb_target=$1
     shift
@@ -166,7 +159,7 @@ collect_usb_power_paths() {
 enable_usb=$(bool_from_string "$(read_config_value "ENABLE_USB_AUTOSUSPEND_OPTIMIZATION" "1")")
 target=$(runtime_target_from_string "$(read_config_value "USB_RUNTIME_PM_TARGET" "auto")")
 enable_usb_wakeup=$(bool_from_string "$(read_config_value "ENABLE_USB_WAKEUP_OPTIMIZATION" "1")")
-usb_wakeup_target=$(wakeup_target_from_string "$(read_config_value "USB_WAKEUP_TARGET" "disabled")")
+usb_wakeup_target="disabled"
 device_glob=$(read_config_value "USB_DEVICE_GLOB" "*")
 [[ -n "$device_glob" ]] || device_glob="*"
 usb_auto_startup=$(bool_from_string "$(read_config_value "USB_AUTO_EXECUTE_ON_STARTUP" "0")")

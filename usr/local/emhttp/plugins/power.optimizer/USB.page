@@ -19,24 +19,16 @@ Title="USB"
             Enable USB Autosuspend Optimization
         </label>
 
-        <label>
-            USB Runtime Power Management<br>
-            <select id="usb-runtime-pm-target">
-                <option value="disabled">disabled</option>
-                <option value="auto">auto</option>
-            </select>
-        </label>
-
         <label class="toggle">
             <input type="checkbox" id="enable-usb-wakeup-optimization" checked>
             Enable USB Wakeup Optimization
         </label>
 
         <label>
-            USB Wakeup Target<br>
-            <select id="usb-wakeup-target">
+            USB Runtime Power Management<br>
+            <select id="usb-runtime-pm-target">
                 <option value="disabled">disabled</option>
-                <option value="enabled">enabled</option>
+                <option value="auto">auto</option>
             </select>
         </label>
 
@@ -105,7 +97,6 @@ input[type="text"] { width: 100%; }
     const enableUsb = document.getElementById('enable-usb-autosuspend-optimization');
     const target = document.getElementById('usb-runtime-pm-target');
     const enableUsbWakeup = document.getElementById('enable-usb-wakeup-optimization');
-    const wakeupTarget = document.getElementById('usb-wakeup-target');
     const deviceGlob = document.getElementById('usb-device-glob');
     const saveButton = document.getElementById('usb-save-button');
     const runButton = document.getElementById('usb-run-button');
@@ -224,7 +215,6 @@ input[type="text"] { width: 100%; }
             enable_usb_autosuspend_optimization: enableUsb.checked ? '1' : '0',
             usb_runtime_pm_target: target.value,
             enable_usb_wakeup_optimization: enableUsbWakeup.checked ? '1' : '0',
-            usb_wakeup_target: wakeupTarget.value,
             usb_device_glob: deviceGlob.value
         };
     }
@@ -248,7 +238,7 @@ input[type="text"] { width: 100%; }
     }
 
     function registerDirtyTracking() {
-        [autoStartupToggle, enableUsb, target, enableUsbWakeup, wakeupTarget, deviceGlob].forEach(function (element) {
+        [autoStartupToggle, enableUsb, target, enableUsbWakeup, deviceGlob].forEach(function (element) {
             element.addEventListener('change', updateSaveButtonState);
             element.addEventListener('input', updateSaveButtonState);
         });
@@ -259,7 +249,6 @@ input[type="text"] { width: 100%; }
         enableUsb.checked = Number(settings.enable_usb_autosuspend_optimization || 0) === 1;
         target.value = settings.usb_runtime_pm_target || 'auto';
         enableUsbWakeup.checked = Number(settings.enable_usb_wakeup_optimization || 0) === 1;
-        wakeupTarget.value = settings.usb_wakeup_target || 'disabled';
         deviceGlob.value = settings.usb_device_glob || '*';
         markSettingsSaved();
     }
