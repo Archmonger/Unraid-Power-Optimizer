@@ -105,6 +105,8 @@ enable_vm_writeback_timeout=$(bool_from_string "$(read_config_value "ENABLE_VM_W
 vm_dirty_writeback_centisecs=$(int_in_range "$(read_config_value "VM_DIRTY_WRITEBACK_CENTISECS" "1500")" 1500 100 60000)
 vfs_cache_pressure=$(int_in_range "$(read_config_value "VFS_CACHE_PRESSURE" "1")" 1 1 10000)
 vfs_cache_max_age=$(int_in_range "$(read_config_value "VFS_CACHE_MAX_AGE" "60000")" 60000 1 31536000)
+enable_disk_metadata_cache_warmup=$(bool_from_string "$(read_config_value "ENABLE_DISK_METADATA_CACHE_WARMUP" "1")")
+enable_user_share_metadata_cache_warmup=$(bool_from_string "$(read_config_value "ENABLE_USER_SHARE_METADATA_CACHE_WARMUP" "0")")
 zfs_arc_min_percent=$(int_in_range "$(read_config_value "ZFS_ARC_MIN_PERCENT" "10")" 10 0 100)
 zfs_arc_max_percent=$(int_in_range "$(read_config_value "ZFS_ARC_MAX_PERCENT" "40")" 40 0 100)
 
@@ -132,6 +134,8 @@ echo "System setting ENABLE_VM_WRITEBACK_TIMEOUT_OPTIMIZATION=${enable_vm_writeb
 echo "System setting VM_DIRTY_WRITEBACK_CENTISECS=${vm_dirty_writeback_centisecs}."
 echo "System setting VFS_CACHE_PRESSURE=${vfs_cache_pressure}."
 echo "System setting VFS_CACHE_MAX_AGE=${vfs_cache_max_age}."
+echo "System setting ENABLE_DISK_METADATA_CACHE_WARMUP=${enable_disk_metadata_cache_warmup}."
+echo "System setting ENABLE_USER_SHARE_METADATA_CACHE_WARMUP=${enable_user_share_metadata_cache_warmup}."
 echo "System setting ZFS_ARC_MIN_PERCENT=${zfs_arc_min_percent}."
 echo "System setting ZFS_ARC_MAX_PERCENT=${zfs_arc_max_percent}."
 
@@ -150,6 +154,52 @@ write_value_with_status() {
         fi
     else
         echo "$not_writable_message"
+    fi
+}
+
+run_metadata_cache_scan() {
+    local target_path=$1
+
+    if [[ ! -d "$target_path" ]]; then
+        echo "Metadata cache warmup skipped for ${target_path}: path not found."
+        return 0
+    fi
+
+    if command -v ionice >/dev/null 2>&1; then
+        ionice -c3 nice -n 19 find "$target_path" -xdev -printf '' >/dev/null 2>&1
+    else
+        nice -n 19 find "$target_path" -xdev -printf '' >/dev/null 2>&1
+    fi
+}
+
+warm_disk_metadata_cache() {
+    local found_mount=0
+    local disk_path
+
+    for disk_path in /mnt/disk*; do
+        [[ -d "$disk_path" ]] || continue
+        found_mount=1
+        echo "Starting metadata cache warmup scan for ${disk_path}."
+        if run_metadata_cache_scan "$disk_path"; then
+            echo "Metadata cache warmup scan completed for ${disk_path}."
+        else
+            echo "Metadata cache warmup scan failed for ${disk_path}."
+        fi
+    done
+
+    if [[ "$found_mount" -eq 0 ]]; then
+        echo "Metadata cache warmup skipped: no /mnt/disk* mount paths found."
+    fi
+}
+
+warm_user_share_metadata_cache() {
+    local user_share_path="/mnt/user"
+
+    echo "Starting metadata cache warmup scan for ${user_share_path}."
+    if run_metadata_cache_scan "$user_share_path"; then
+        echo "Metadata cache warmup scan completed for ${user_share_path}."
+    else
+        echo "Metadata cache warmup scan failed for ${user_share_path}."
     fi
 }
 
@@ -199,6 +249,18 @@ write_value_with_status \
     "vm.vfs_cache_max_age set to ${vfs_cache_max_age}." \
     "Failed to set vm.vfs_cache_max_age to ${vfs_cache_max_age}." \
     "vm.vfs_cache_max_age path is not writable on this system."
+
+if [[ "$enable_disk_metadata_cache_warmup" -eq 1 ]]; then
+    warm_disk_metadata_cache
+else
+    echo "Disk metadata cache warmup disabled; no /mnt/disk* cache scan performed."
+fi
+
+if [[ "$enable_user_share_metadata_cache_warmup" -eq 1 ]]; then
+    warm_user_share_metadata_cache
+else
+    echo "User share metadata cache warmup disabled; no /mnt/user cache scan performed."
+fi
 
 if [[ "$zfs_arc_min_percent" -eq 0 ]]; then
     echo "ZFS ARC min percent is 0; keeping existing zfs_arc_min value."
