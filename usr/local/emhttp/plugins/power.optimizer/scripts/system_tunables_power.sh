@@ -103,12 +103,15 @@ power_aware_scheduler_mode=$(int_in_range "$(read_config_value "POWER_AWARE_CPU_
 
 enable_vm_writeback_timeout=$(bool_from_string "$(read_config_value "ENABLE_VM_WRITEBACK_TIMEOUT_OPTIMIZATION" "1")")
 vm_dirty_writeback_centisecs=$(int_in_range "$(read_config_value "VM_DIRTY_WRITEBACK_CENTISECS" "1500")" 1500 100 60000)
+vm_laptop_mode=$(int_in_range "$(read_config_value "VM_LAPTOP_MODE" "5")" 5 0 100)
+vm_dirty_expire_centisecs=$(int_in_range "$(read_config_value "VM_DIRTY_EXPIRE_CENTISECS" "6000")" 6000 100 600000)
 vfs_cache_pressure=$(int_in_range "$(read_config_value "VFS_CACHE_PRESSURE" "1")" 1 1 10000)
 vfs_cache_max_age=$(int_in_range "$(read_config_value "VFS_CACHE_MAX_AGE" "60000")" 60000 1 31536000)
 enable_disk_metadata_cache_warmup=$(bool_from_string "$(read_config_value "ENABLE_DISK_METADATA_CACHE_WARMUP" "1")")
 enable_user_share_metadata_cache_warmup=$(bool_from_string "$(read_config_value "ENABLE_USER_SHARE_METADATA_CACHE_WARMUP" "0")")
 zfs_arc_min_percent=$(int_in_range "$(read_config_value "ZFS_ARC_MIN_PERCENT" "10")" 10 0 100)
 zfs_arc_max_percent=$(int_in_range "$(read_config_value "ZFS_ARC_MAX_PERCENT" "40")" 40 0 100)
+numa_balancing_target=$(int_in_range "$(read_config_value "NUMA_BALANCING_TARGET" "0")" 0 0 1)
 
 if [[ "$zfs_arc_min_percent" -gt 0 && "$zfs_arc_max_percent" -gt 0 && "$zfs_arc_min_percent" -gt "$zfs_arc_max_percent" ]]; then
     echo "ZFS ARC min percent (${zfs_arc_min_percent}%) was above max (${zfs_arc_max_percent}%); clamping min to max."
@@ -132,12 +135,15 @@ echo "System setting DISABLE_NMI_WATCHDOG=${disable_nmi_watchdog}."
 echo "System setting POWER_AWARE_CPU_SCHEDULER_MODE=${power_aware_scheduler_mode}."
 echo "System setting ENABLE_VM_WRITEBACK_TIMEOUT_OPTIMIZATION=${enable_vm_writeback_timeout}."
 echo "System setting VM_DIRTY_WRITEBACK_CENTISECS=${vm_dirty_writeback_centisecs}."
+echo "System setting VM_LAPTOP_MODE=${vm_laptop_mode}."
+echo "System setting VM_DIRTY_EXPIRE_CENTISECS=${vm_dirty_expire_centisecs}."
 echo "System setting VFS_CACHE_PRESSURE=${vfs_cache_pressure}."
 echo "System setting VFS_CACHE_MAX_AGE=${vfs_cache_max_age}."
 echo "System setting ENABLE_DISK_METADATA_CACHE_WARMUP=${enable_disk_metadata_cache_warmup}."
 echo "System setting ENABLE_USER_SHARE_METADATA_CACHE_WARMUP=${enable_user_share_metadata_cache_warmup}."
 echo "System setting ZFS_ARC_MIN_PERCENT=${zfs_arc_min_percent}."
 echo "System setting ZFS_ARC_MAX_PERCENT=${zfs_arc_max_percent}."
+echo "System setting NUMA_BALANCING_TARGET=${numa_balancing_target}."
 
 write_value_with_status() {
     local path=$1
@@ -237,6 +243,20 @@ else
 fi
 
 write_value_with_status \
+    /proc/sys/vm/laptop_mode \
+    "$vm_laptop_mode" \
+    "vm.laptop_mode set to ${vm_laptop_mode}." \
+    "Failed to set vm.laptop_mode to ${vm_laptop_mode}." \
+    "vm.laptop_mode path is not writable on this system."
+
+write_value_with_status \
+    /proc/sys/vm/dirty_expire_centisecs \
+    "$vm_dirty_expire_centisecs" \
+    "vm.dirty_expire_centisecs set to ${vm_dirty_expire_centisecs}." \
+    "Failed to set vm.dirty_expire_centisecs to ${vm_dirty_expire_centisecs}." \
+    "vm.dirty_expire_centisecs path is not writable on this system."
+
+write_value_with_status \
     /proc/sys/vm/vfs_cache_pressure \
     "$vfs_cache_pressure" \
     "vm.vfs_cache_pressure set to ${vfs_cache_pressure}." \
@@ -294,3 +314,10 @@ write_value_with_status \
     "sched_mc_power_savings set to ${power_aware_scheduler_mode}." \
     "Failed to set sched_mc_power_savings to ${power_aware_scheduler_mode}." \
     "sched_mc_power_savings path is not writable on this system."
+
+write_value_with_status \
+    /proc/sys/kernel/numa_balancing \
+    "$numa_balancing_target" \
+    "kernel.numa_balancing set to ${numa_balancing_target}." \
+    "Failed to set kernel.numa_balancing to ${numa_balancing_target}." \
+    "kernel.numa_balancing path is not writable on this system."

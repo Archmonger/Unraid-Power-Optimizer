@@ -56,16 +56,27 @@ sata_lpm_mode_from_string() {
     esac
 }
 
+nvme_apst_mode_from_string() {
+    case "${1,,}" in
+        disabled|off) echo "disabled" ;;
+        *) echo "enabled" ;;
+    esac
+}
+
 sata_mode=$(sata_lpm_mode_from_string "$(read_config_value "SATA_LPM_MODE" "min_power")")
 disks_auto_startup=$(bool_from_string "$(read_config_value "DISKS_AUTO_EXECUTE_ON_STARTUP" "0")")
 
 disk_mode=$(runtime_pm_mode_from_string "$(read_config_value "DISK_RUNTIME_PM_MODE" "auto")")
 ata_mode=$(runtime_pm_mode_from_string "$(read_config_value "ATA_RUNTIME_PM_MODE" "auto")")
+nvme_apst_mode=$(nvme_apst_mode_from_string "$(read_config_value "NVME_APST_MODE" "enabled")")
+nvme_runtime_pm_mode=$(runtime_pm_mode_from_string "$(read_config_value "NVME_RUNTIME_PM_MODE" "auto")")
 
 echo "Disks setting DISKS_AUTO_EXECUTE_ON_STARTUP=${disks_auto_startup}."
 echo "Disks setting SATA_LPM_MODE=${sata_mode}."
 echo "Disks setting DISK_RUNTIME_PM_MODE=${disk_mode}."
 echo "Disks setting ATA_RUNTIME_PM_MODE=${ata_mode}."
+echo "Disks setting NVME_APST_MODE=${nvme_apst_mode}."
+echo "Disks setting NVME_RUNTIME_PM_MODE=${nvme_runtime_pm_mode}."
 
 collect_sysfs_paths() {
     local -a matched_paths=()
@@ -266,6 +277,34 @@ apply_runtime_pm_mode() {
     echo "${label} requested ${requested_mode}; ${success_count}/${writable_count} writable path(s) updated, ${failure_count} failed."
 }
 
+apply_nvme_apst_mode() {
+    local requested_mode=$1
+    local apst_path="/sys/module/nvme_core/parameters/default_ps_max_latency_us"
+    local current_latency
+
+    if [[ ! -e "$apst_path" ]]; then
+        echo "NVMe APST setting unsupported on this kernel (missing ${apst_path})."
+        return 0
+    fi
+
+    if [[ "$requested_mode" == "disabled" ]]; then
+        if apply_path_candidates_with_verification "NVMe APST" "$apst_path" "0"; then
+            echo "NVMe APST disabled."
+        fi
+        return 0
+    fi
+
+    current_latency=$(read_path_value "$apst_path")
+    if [[ "$current_latency" =~ ^[0-9]+$ ]] && (( current_latency > 0 )); then
+        echo "NVMe APST already enabled (default_ps_max_latency_us=${current_latency})."
+        return 0
+    fi
+
+    if apply_path_candidates_with_verification "NVMe APST" "$apst_path" "5500"; then
+        echo "NVMe APST enabled (default_ps_max_latency_us=5500)."
+    fi
+}
+
 if [[ "$sata_mode" != "disabled" ]]; then
     apply_sata_lpm_mode "$sata_mode"
 else
@@ -293,4 +332,17 @@ if [[ "$ata_mode" != "disabled" ]]; then
         "${ata_controller_paths[@]}"
 else
     echo "ATA runtime PM optimization disabled; no ATA runtime PM changes applied."
+fi
+
+apply_nvme_apst_mode "$nvme_apst_mode"
+
+if [[ "$nvme_runtime_pm_mode" != "disabled" ]]; then
+    apply_runtime_pm_mode "NVMe runtime PM" "$nvme_runtime_pm_mode" \
+        /sys/class/nvme/nvme*/device/power/control \
+        /sys/class/nvme-subsystem/nvme-subsys*/device/power/control \
+        /sys/class/nvme-fabrics/*/power/control \
+        /sys/class/nvme-fabrics/ctl/power/control \
+        /sys/class/nvme-fabrics/ctl*/power/control
+else
+    echo "NVMe runtime PM optimization disabled; no NVMe runtime PM changes applied."
 fi

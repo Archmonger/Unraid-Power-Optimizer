@@ -59,6 +59,8 @@ function default_settings(): array
         'SATA_LPM_MODE' => 'min_power',
         'DISK_RUNTIME_PM_MODE' => 'auto',
         'ATA_RUNTIME_PM_MODE' => 'auto',
+        'NVME_APST_MODE' => 'enabled',
+        'NVME_RUNTIME_PM_MODE' => 'auto',
 
         'USB_MODE' => 'automatic',
         'USB_AUTO_EXECUTE_ON_STARTUP' => '0',
@@ -81,6 +83,8 @@ function default_settings(): array
         'NMI_WATCHDOG_TARGET' => '0',
         'ENABLE_VM_WRITEBACK_TIMEOUT_OPTIMIZATION' => '1',
         'VM_DIRTY_WRITEBACK_CENTISECS' => '1500',
+        'VM_LAPTOP_MODE' => '5',
+        'VM_DIRTY_EXPIRE_CENTISECS' => '6000',
         'VFS_CACHE_PRESSURE' => '1',
         'VFS_CACHE_MAX_AGE' => '60000',
         'ENABLE_DISK_METADATA_CACHE_WARMUP' => '1',
@@ -88,6 +92,7 @@ function default_settings(): array
         'ZFS_ARC_MIN_PERCENT' => '10',
         'ZFS_ARC_MAX_PERCENT' => '40',
         'POWER_AWARE_CPU_SCHEDULER_MODE' => '2',
+        'NUMA_BALANCING_TARGET' => '0',
     ];
 }
 
@@ -485,6 +490,20 @@ function sata_lpm_mode_from_raw(array $raw): string
     return normalize_sata_lpm_mode($raw['SATA_LPM_MODE'] ?? 'min_power', 'min_power');
 }
 
+function normalize_nvme_apst_mode($value, string $default = 'enabled'): string
+{
+    $normalized = strtolower(trim((string)$value));
+    if ($normalized === 'disabled' || $normalized === 'off') {
+        return 'disabled';
+    }
+
+    if ($normalized === 'enabled' || $normalized === 'on') {
+        return 'enabled';
+    }
+
+    return $default;
+}
+
 function normalize_int_range($value, int $default, int $min, int $max): int
 {
     $normalized = trim((string)$value);
@@ -836,6 +855,13 @@ function disks_runtime_pm_capabilities(): array
     return [
         'disk_runtime_pm_targets' => discover_runtime_pm_targets(['/sys/block/sd*/device/power/control']),
         'ata_runtime_pm_targets' => discover_runtime_pm_targets(['/sys/bus/pci/devices/????:??:??.?/ata*/power/control']),
+        'nvme_runtime_pm_targets' => discover_runtime_pm_targets([
+            '/sys/class/nvme/nvme*/device/power/control',
+            '/sys/class/nvme-subsystem/nvme-subsys*/device/power/control',
+            '/sys/class/nvme-fabrics/*/power/control',
+            '/sys/class/nvme-fabrics/ctl/power/control',
+            '/sys/class/nvme-fabrics/ctl*/power/control',
+        ]),
     ];
 }
 
@@ -988,6 +1014,7 @@ function disks_settings_from_raw(array $raw): array
     $capabilities = [
         'disk_runtime_pm_targets' => ['auto'],
         'ata_runtime_pm_targets' => ['auto'],
+        'nvme_runtime_pm_targets' => ['auto'],
     ];
     $sataMode = sata_lpm_mode_from_raw($raw);
     $diskMode = normalize_disks_runtime_pm_mode(
@@ -998,6 +1025,11 @@ function disks_settings_from_raw(array $raw): array
         runtime_pm_mode_from_raw($raw, 'ATA_RUNTIME_PM_MODE', 'auto'),
         'auto'
     );
+    $nvmeApstMode = normalize_nvme_apst_mode($raw['NVME_APST_MODE'] ?? 'enabled', 'enabled');
+    $nvmeMode = normalize_disks_runtime_pm_mode(
+        runtime_pm_mode_from_raw($raw, 'NVME_RUNTIME_PM_MODE', 'auto'),
+        'auto'
+    );
 
     return [
         'auto_execute_on_startup' => normalize_boolean($raw['DISKS_AUTO_EXECUTE_ON_STARTUP'] ?? null, 0),
@@ -1005,8 +1037,11 @@ function disks_settings_from_raw(array $raw): array
         'sata_lpm_mode' => $sataMode,
         'disk_runtime_pm_mode' => $diskMode,
         'ata_runtime_pm_mode' => $ataMode,
+        'nvme_apst_mode' => $nvmeApstMode,
+        'nvme_runtime_pm_mode' => $nvmeMode,
         'disk_runtime_pm_targets' => $capabilities['disk_runtime_pm_targets'],
         'ata_runtime_pm_targets' => $capabilities['ata_runtime_pm_targets'],
+        'nvme_runtime_pm_targets' => $capabilities['nvme_runtime_pm_targets'],
     ];
 }
 
@@ -1055,12 +1090,20 @@ function i2c_settings_from_raw(array $raw): array
 function system_tunables_settings_from_raw(array $raw): array
 {
     $nmiTarget = normalize_int_range($raw['NMI_WATCHDOG_TARGET'] ?? 0, 0, 0, 1);
+    $numaBalancingTarget = normalize_int_range($raw['NUMA_BALANCING_TARGET'] ?? 0, 0, 0, 1);
     $schedulerMode = power_aware_scheduler_mode_from_raw($raw);
     $vmDirtyWritebackCentisecs = normalize_int_range(
         $raw['VM_DIRTY_WRITEBACK_CENTISECS'] ?? 1500,
         1500,
         100,
         60000
+    );
+    $vmLaptopMode = normalize_int_range($raw['VM_LAPTOP_MODE'] ?? 5, 5, 0, 100);
+    $vmDirtyExpireCentisecs = normalize_int_range(
+        $raw['VM_DIRTY_EXPIRE_CENTISECS'] ?? 6000,
+        6000,
+        100,
+        600000
     );
     $vfsCachePressure = normalize_int_range($raw['VFS_CACHE_PRESSURE'] ?? 1, 1, 1, 10000);
     $vfsCacheMaxAge = normalize_int_range($raw['VFS_CACHE_MAX_AGE'] ?? 60000, 60000, 1, 31536000);
@@ -1078,6 +1121,8 @@ function system_tunables_settings_from_raw(array $raw): array
         'disable_nmi_watchdog' => $nmiTarget === 0 ? 1 : 0,
         'enable_vm_writeback_timeout_optimization' => normalize_boolean($raw['ENABLE_VM_WRITEBACK_TIMEOUT_OPTIMIZATION'] ?? null, 1),
         'vm_dirty_writeback_centisecs' => $vmDirtyWritebackCentisecs,
+        'vm_laptop_mode' => $vmLaptopMode,
+        'vm_dirty_expire_centisecs' => $vmDirtyExpireCentisecs,
         'vfs_cache_pressure' => $vfsCachePressure,
         'vfs_cache_max_age' => $vfsCacheMaxAge,
         'enable_disk_metadata_cache_warmup' => normalize_boolean($raw['ENABLE_DISK_METADATA_CACHE_WARMUP'] ?? null, 1),
@@ -1085,6 +1130,7 @@ function system_tunables_settings_from_raw(array $raw): array
         'zfs_arc_min_percent' => $zfsArcMinPercent,
         'zfs_arc_max_percent' => $zfsArcMaxPercent,
         'power_aware_cpu_scheduler_mode' => $schedulerMode,
+        'disable_numa_balancing' => $numaBalancingTarget === 0 ? 1 : 0,
     ];
 }
 
@@ -1917,6 +1963,8 @@ if ($action === 'save_disks_settings') {
     $sataMode = normalize_sata_lpm_mode($_POST['sata_lpm_mode'] ?? 'min_power', 'min_power');
     $diskMode = normalize_disks_runtime_pm_mode($_POST['disk_runtime_pm_mode'] ?? 'auto', 'auto');
     $ataMode = normalize_disks_runtime_pm_mode($_POST['ata_runtime_pm_mode'] ?? 'auto', 'auto');
+    $nvmeApstMode = normalize_nvme_apst_mode($_POST['nvme_apst_mode'] ?? 'enabled', 'enabled');
+    $nvmeMode = normalize_disks_runtime_pm_mode($_POST['nvme_runtime_pm_mode'] ?? 'auto', 'auto');
 
     $updates = [
         'DISKS_MODE' => 'automatic',
@@ -1924,6 +1972,8 @@ if ($action === 'save_disks_settings') {
         'SATA_LPM_MODE' => $sataMode,
         'DISK_RUNTIME_PM_MODE' => $diskMode,
         'ATA_RUNTIME_PM_MODE' => $ataMode,
+        'NVME_APST_MODE' => $nvmeApstMode,
+        'NVME_RUNTIME_PM_MODE' => $nvmeMode,
     ];
 
     $updatedRaw = array_merge($rawSettings, $updates);
@@ -2068,6 +2118,15 @@ if ($action === 'save_system_tunables_settings') {
         100,
         60000
     );
+    $vmLaptopMode = normalize_int_range($_POST['vm_laptop_mode'] ?? 5, 5, 0, 100);
+    $vmDirtyExpireCentisecs = normalize_int_range(
+        $_POST['vm_dirty_expire_centisecs'] ?? 6000,
+        6000,
+        100,
+        600000
+    );
+    $disableNumaBalancing = normalize_boolean($_POST['disable_numa_balancing'] ?? null, 1) === 1;
+    $numaBalancingTarget = $disableNumaBalancing ? 0 : 1;
     $vfsCachePressure = normalize_int_range($_POST['vfs_cache_pressure'] ?? 1, 1, 1, 10000);
     $vfsCacheMaxAge = normalize_int_range($_POST['vfs_cache_max_age'] ?? 60000, 60000, 1, 31536000);
     $zfsArcMinPercent = normalize_int_range($_POST['zfs_arc_min_percent'] ?? 10, 10, 0, 100);
@@ -2085,6 +2144,9 @@ if ($action === 'save_system_tunables_settings') {
         'NMI_WATCHDOG_TARGET' => $disableNmiWatchdog ? '0' : '1',
         'ENABLE_VM_WRITEBACK_TIMEOUT_OPTIMIZATION' => (string)$vmWritebackEnabled,
         'VM_DIRTY_WRITEBACK_CENTISECS' => (string)$vmDirtyWritebackCentisecs,
+        'VM_LAPTOP_MODE' => (string)$vmLaptopMode,
+        'VM_DIRTY_EXPIRE_CENTISECS' => (string)$vmDirtyExpireCentisecs,
+        'NUMA_BALANCING_TARGET' => (string)$numaBalancingTarget,
         'VFS_CACHE_PRESSURE' => (string)$vfsCachePressure,
         'VFS_CACHE_MAX_AGE' => (string)$vfsCacheMaxAge,
         'ENABLE_DISK_METADATA_CACHE_WARMUP' => (string)normalize_boolean($_POST['enable_disk_metadata_cache_warmup'] ?? null, 1),

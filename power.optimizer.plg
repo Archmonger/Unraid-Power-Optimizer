@@ -180,6 +180,8 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     echo 'SATA_LPM_MODE="min_power"'
     echo 'DISK_RUNTIME_PM_MODE="auto"'
     echo 'ATA_RUNTIME_PM_MODE="auto"'
+    echo 'NVME_APST_MODE="enabled"'
+    echo 'NVME_RUNTIME_PM_MODE="auto"'
 
     echo 'USB_MODE="automatic"'
     echo 'USB_AUTO_EXECUTE_ON_STARTUP="0"'
@@ -201,9 +203,12 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     echo 'NMI_WATCHDOG_TARGET="0"'
     echo 'ENABLE_VM_WRITEBACK_TIMEOUT_OPTIMIZATION="1"'
     echo 'VM_DIRTY_WRITEBACK_CENTISECS="1500"'
+    echo 'VM_LAPTOP_MODE="5"'
+    echo 'VM_DIRTY_EXPIRE_CENTISECS="6000"'
     echo 'ENABLE_DISK_METADATA_CACHE_WARMUP="1"'
     echo 'ENABLE_USER_SHARE_METADATA_CACHE_WARMUP="0"'
     echo 'POWER_AWARE_CPU_SCHEDULER_MODE="2"'
+    echo 'NUMA_BALANCING_TARGET="0"'
   } > "$CONFIG_FILE"
 fi
 ]]></INLINE></FILE>

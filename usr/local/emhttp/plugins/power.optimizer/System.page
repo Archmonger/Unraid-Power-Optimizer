@@ -8,75 +8,96 @@ Title="System Tunables"
         System tunables focused on practical power savings. These settings can reduce power but may affect latency or device behavior depending on platform and workload.
     </p>
 
-    <div class="grid">
-        <label class="toggle">
-            <input type="checkbox" id="system-auto-startup-toggle">
-            Auto Execute on Startup
-        </label>
+    <div class="settings-group">
+        <div class="grid">
+            <label class="toggle">
+                <input type="checkbox" id="system-auto-startup-toggle">
+                Auto Execute on Startup
+            </label>
 
-        <label class="toggle">
-            <input type="checkbox" id="enable-audio-codec-pm-optimization" checked>
-            Enable Audio Codec Power Management
-        </label>
+            <label class="toggle">
+                <input type="checkbox" id="enable-audio-codec-pm-optimization" checked>
+                Enable Audio Codec Power Management
+            </label>
 
-        <label>
-            Audio codec power_save (seconds)<br>
-            <input type="number" id="audio-codec-power-save-seconds" min="0" max="60" step="1">
-        </label>
+            <label class="toggle">
+                <input type="checkbox" id="disable-nmi-watchdog" checked>
+                Disable NMI Watchdog
+            </label>
 
-        <label class="toggle">
-            <input type="checkbox" id="disable-nmi-watchdog" checked>
-            Disable NMI Watchdog
-        </label>
+            <label class="toggle">
+                <input type="checkbox" id="enable-vm-writeback-timeout-optimization" checked>
+                Enable VM Writeback Timeout Optimization
+            </label>
 
-        <label class="toggle">
-            <input type="checkbox" id="enable-vm-writeback-timeout-optimization" checked>
-            Enable VM Writeback Timeout Optimization
-        </label>
+            <label class="toggle">
+                <input type="checkbox" id="enable-disk-metadata-cache-warmup" checked>
+                Immediately cache /mnt/disk*/ file metadata and folder structure
+            </label>
 
-        <label>
-            vm.dirty_writeback_centisecs<br>
-            <input type="number" id="vm-dirty-writeback-centisecs" min="100" max="60000" step="100">
-        </label>
+            <label class="toggle">
+                <input type="checkbox" id="enable-user-share-metadata-cache-warmup">
+                Immediately cache /mnt/user/ file metadata and folder structure
+            </label>
 
-        <label>
-            vm.vfs_cache_pressure<br>
-            <input type="number" id="vfs-cache-pressure" min="1" max="10000" step="1">
-        </label>
+            <label class="toggle">
+                <input type="checkbox" id="disable-numa-balancing" checked>
+                Disable Automatic NUMA Balancing
+            </label>
+        </div>
+    </div>
 
-        <label>
-            vm.vfs_cache_max_age<br>
-            <input type="number" id="vfs-cache-max-age" min="1" max="31536000" step="1">
-        </label>
+    <div class="settings-group">
+        <div class="grid">
+            <label>
+                sched_mc_power_savings<br>
+                <select id="power-aware-cpu-scheduler-mode">
+                    <option value="0">0: no power savings</option>
+                    <option value="1">1: use active cores first</option>
+                    <option value="2">2: use active cores first and bias wakeups towards semi-idle cores</option>
+                </select>
+            </label>
 
-        <label class="toggle">
-            <input type="checkbox" id="enable-disk-metadata-cache-warmup" checked>
-            Immediately cache /mnt/disk*/ file metadata and folder structure
-        </label>
+            <label>
+                Audio codec power_save (seconds)<br>
+                <input type="number" id="audio-codec-power-save-seconds" min="0" max="60" step="1">
+            </label>
 
-        <label class="toggle">
-            <input type="checkbox" id="enable-user-share-metadata-cache-warmup">
-            Immediately cache /mnt/user/ file metadata and folder structure
-        </label>
+            <label>
+                vm.dirty_writeback_centisecs<br>
+                <input type="number" id="vm-dirty-writeback-centisecs" min="100" max="60000" step="100">
+            </label>
 
-        <label>
-            ZFS ARC min (% of RAM, 0 to disable)<br>
-            <input type="number" id="zfs-arc-min-percent" min="0" max="100" step="1">
-        </label>
+            <label>
+                vm.laptop_mode<br>
+                <input type="number" id="vm-laptop-mode" min="0" max="100" step="1">
+            </label>
 
-        <label>
-            ZFS ARC max (% of RAM, 0 to disable)<br>
-            <input type="number" id="zfs-arc-max-percent" min="0" max="100" step="1">
-        </label>
+            <label>
+                vm.dirty_expire_centisecs<br>
+                <input type="number" id="vm-dirty-expire-centisecs" min="100" max="600000" step="100">
+            </label>
 
-        <label>
-            Power Aware Linux Scheduler<br>
-            <select id="power-aware-cpu-scheduler-mode">
-                <option value="0">no power savings</option>
-                <option value="1">use active cores first</option>
-                <option value="2">use active cores first and bias wakeups towards semi-idle cores</option>
-            </select>
-        </label>
+            <label>
+                vm.vfs_cache_pressure<br>
+                <input type="number" id="vfs-cache-pressure" min="1" max="10000" step="1">
+            </label>
+
+            <label>
+                vm.vfs_cache_max_age<br>
+                <input type="number" id="vfs-cache-max-age" min="1" max="31536000" step="1">
+            </label>
+
+            <label>
+                zfs_arc_min (% of RAM, 0 to disable)<br>
+                <input type="number" id="zfs-arc-min-percent" min="0" max="100" step="1">
+            </label>
+
+            <label>
+                zfs_arc_max (% of RAM, 0 to disable)<br>
+                <input type="number" id="zfs-arc-max-percent" min="0" max="100" step="1">
+            </label>
+        </div>
     </div>
 
     <div class="row">
@@ -94,6 +115,7 @@ Title="System Tunables"
 
 <style>
 .power-section { max-width: 980px; }
+.settings-group { margin: 12px 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin: 10px 0; }
 .toggle { display: inline-flex; align-items: center; gap: 8px; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
@@ -140,6 +162,8 @@ input[type="number"] { width: 100%; }
     const disableNmiWatchdog = document.getElementById('disable-nmi-watchdog');
     const enableVmWritebackTimeoutOptimization = document.getElementById('enable-vm-writeback-timeout-optimization');
     const vmDirtyWritebackCentisecs = document.getElementById('vm-dirty-writeback-centisecs');
+    const vmLaptopMode = document.getElementById('vm-laptop-mode');
+    const vmDirtyExpireCentisecs = document.getElementById('vm-dirty-expire-centisecs');
     const vfsCachePressure = document.getElementById('vfs-cache-pressure');
     const vfsCacheMaxAge = document.getElementById('vfs-cache-max-age');
     const enableDiskMetadataCacheWarmup = document.getElementById('enable-disk-metadata-cache-warmup');
@@ -147,6 +171,7 @@ input[type="number"] { width: 100%; }
     const zfsArcMinPercent = document.getElementById('zfs-arc-min-percent');
     const zfsArcMaxPercent = document.getElementById('zfs-arc-max-percent');
     const powerAwareSchedulerMode = document.getElementById('power-aware-cpu-scheduler-mode');
+    const disableNumaBalancing = document.getElementById('disable-numa-balancing');
 
     const saveButton = document.getElementById('system-save-button');
     const runButton = document.getElementById('system-run-button');
@@ -267,13 +292,16 @@ input[type="number"] { width: 100%; }
             disable_nmi_watchdog: disableNmiWatchdog.checked ? '1' : '0',
             enable_vm_writeback_timeout_optimization: enableVmWritebackTimeoutOptimization.checked ? '1' : '0',
             vm_dirty_writeback_centisecs: vmDirtyWritebackCentisecs.value,
+            vm_laptop_mode: vmLaptopMode.value,
+            vm_dirty_expire_centisecs: vmDirtyExpireCentisecs.value,
             vfs_cache_pressure: vfsCachePressure.value,
             vfs_cache_max_age: vfsCacheMaxAge.value,
             enable_disk_metadata_cache_warmup: enableDiskMetadataCacheWarmup.checked ? '1' : '0',
             enable_user_share_metadata_cache_warmup: enableUserShareMetadataCacheWarmup.checked ? '1' : '0',
             zfs_arc_min_percent: zfsArcMinPercent.value,
             zfs_arc_max_percent: zfsArcMaxPercent.value,
-            power_aware_cpu_scheduler_mode: powerAwareSchedulerMode.value
+            power_aware_cpu_scheduler_mode: powerAwareSchedulerMode.value,
+            disable_numa_balancing: disableNumaBalancing.checked ? '1' : '0'
         };
     }
 
@@ -303,13 +331,16 @@ input[type="number"] { width: 100%; }
             disableNmiWatchdog,
             enableVmWritebackTimeoutOptimization,
             vmDirtyWritebackCentisecs,
+            vmLaptopMode,
+            vmDirtyExpireCentisecs,
             vfsCachePressure,
             vfsCacheMaxAge,
             enableDiskMetadataCacheWarmup,
             enableUserShareMetadataCacheWarmup,
             zfsArcMinPercent,
             zfsArcMaxPercent,
-            powerAwareSchedulerMode
+            powerAwareSchedulerMode,
+            disableNumaBalancing
         ].forEach(function (element) {
             element.addEventListener('change', updateSaveButtonState);
             element.addEventListener('input', updateSaveButtonState);
@@ -325,6 +356,8 @@ input[type="number"] { width: 100%; }
 
         enableVmWritebackTimeoutOptimization.checked = Number(settings.enable_vm_writeback_timeout_optimization || 0) === 1;
         vmDirtyWritebackCentisecs.value = String(settings.vm_dirty_writeback_centisecs || 1500);
+        vmLaptopMode.value = String(settings.vm_laptop_mode ?? 5);
+        vmDirtyExpireCentisecs.value = String(settings.vm_dirty_expire_centisecs ?? 6000);
         vfsCachePressure.value = String(settings.vfs_cache_pressure ?? 1);
         vfsCacheMaxAge.value = String(settings.vfs_cache_max_age ?? 60000);
         enableDiskMetadataCacheWarmup.checked = Number(settings.enable_disk_metadata_cache_warmup ?? 1) === 1;
@@ -333,6 +366,8 @@ input[type="number"] { width: 100%; }
         zfsArcMaxPercent.value = String(settings.zfs_arc_max_percent ?? 40);
 
         powerAwareSchedulerMode.value = String(settings.power_aware_cpu_scheduler_mode || 2);
+        const disableNumaBalancingValue = settings.disable_numa_balancing ?? 1;
+        disableNumaBalancing.checked = Number(disableNumaBalancingValue) === 1;
         markSettingsSaved();
     }
 

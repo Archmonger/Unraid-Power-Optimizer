@@ -33,6 +33,19 @@ Title="Disks"
             ATA Power Management<br>
             <select id="ata-runtime-pm-mode"></select>
         </label>
+
+        <label>
+            NVMe Autonomous Power State Transition<br>
+            <select id="nvme-apst-mode">
+                <option value="enabled">enabled</option>
+                <option value="disabled">disabled</option>
+            </select>
+        </label>
+
+        <label>
+            NVMe Runtime Power Management<br>
+            <select id="nvme-runtime-pm-mode"></select>
+        </label>
     </div>
 
     <div class="row">
@@ -94,6 +107,8 @@ Title="Disks"
     const sataLpmMode = document.getElementById('sata-lpm-mode');
     const diskRuntimePmMode = document.getElementById('disk-runtime-pm-mode');
     const ataRuntimePmMode = document.getElementById('ata-runtime-pm-mode');
+    const nvmeApstMode = document.getElementById('nvme-apst-mode');
+    const nvmeRuntimePmMode = document.getElementById('nvme-runtime-pm-mode');
     const saveButton = document.getElementById('disks-save-button');
     const runButton = document.getElementById('disks-run-button');
     const spinDownAllButton = document.getElementById('disks-spin-down-all-button');
@@ -105,7 +120,8 @@ Title="Disks"
         executionLogTail: '',
         savedSettingsSignature: '',
         diskRuntimePmTargets: ['auto'],
-        ataRuntimePmTargets: ['auto']
+        ataRuntimePmTargets: ['auto'],
+        nvmeRuntimePmTargets: ['auto']
     };
 
     let executionLogTimer = null;
@@ -214,6 +230,8 @@ Title="Disks"
             sata_lpm_mode: sataLpmMode.value,
             disk_runtime_pm_mode: diskRuntimePmMode.value,
             ata_runtime_pm_mode: ataRuntimePmMode.value,
+            nvme_apst_mode: nvmeApstMode.value,
+            nvme_runtime_pm_mode: nvmeRuntimePmMode.value,
         };
     }
 
@@ -281,7 +299,7 @@ Title="Disks"
     }
 
     function registerDirtyTracking() {
-        [autoStartupToggle, sataLpmMode, diskRuntimePmMode, ataRuntimePmMode].forEach(function (element) {
+        [autoStartupToggle, sataLpmMode, diskRuntimePmMode, ataRuntimePmMode, nvmeApstMode, nvmeRuntimePmMode].forEach(function (element) {
             element.addEventListener('change', updateSaveButtonState);
             element.addEventListener('input', updateSaveButtonState);
         });
@@ -291,6 +309,7 @@ Title="Disks"
         const caps = capabilities || {};
         state.diskRuntimePmTargets = normalizeRuntimeTargets(caps.disk_runtime_pm_targets);
         state.ataRuntimePmTargets = normalizeRuntimeTargets(caps.ata_runtime_pm_targets);
+        state.nvmeRuntimePmTargets = normalizeRuntimeTargets(caps.nvme_runtime_pm_targets);
 
         autoStartupToggle.checked = Number(settings.auto_execute_on_startup || 0) === 1;
         sataLpmMode.value = settings.sata_lpm_mode || 'min_power';
@@ -304,6 +323,17 @@ Title="Disks"
             ataRuntimePmMode,
             state.ataRuntimePmTargets,
             settings.ata_runtime_pm_mode || 'auto'
+        );
+
+        if (settings.nvme_apst_mode === 'disabled') {
+            nvmeApstMode.value = 'disabled';
+        } else {
+            nvmeApstMode.value = 'enabled';
+        }
+        populateRuntimePmSelect(
+            nvmeRuntimePmMode,
+            state.nvmeRuntimePmTargets,
+            settings.nvme_runtime_pm_mode || 'auto'
         );
 
         markSettingsSaved();
