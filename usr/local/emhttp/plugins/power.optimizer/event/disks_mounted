@@ -141,6 +141,11 @@ fi
 date +%s > "$LAST_RUN_FILE" 2>/dev/null || true
 logger -t "$PLUGIN_NAME" "Startup hook running (source=${EVENT_SOURCE})."
 
+if [[ -x "/usr/local/emhttp/plugins/power.optimizer/scripts/pcie_power.sh" ]]; then
+    mkdir -p "$LOG_DIR"
+    /bin/bash "/usr/local/emhttp/plugins/power.optimizer/scripts/pcie_power.sh" "startup-crash-check" >> "${LOG_DIR}/power.optimizer-pcie.log" 2>&1 || true
+fi
+
 run_startup_script "AUTO_EXECUTE_ON_STARTUP" "0" \
     "/usr/local/emhttp/plugins/power.optimizer/scripts/pcie_power.sh" \
     "${LOG_DIR}/power.optimizer-pcie.log" \

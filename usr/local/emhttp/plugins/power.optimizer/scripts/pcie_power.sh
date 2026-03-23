@@ -11,6 +11,7 @@ enable_timestamped_output
 PLUGIN_NAME="power.optimizer"
 PLUGIN_MODE_AUTO_OPTIMIZE="auto-optimize"
 PLUGIN_MODE_STARTUP_AUTO_OPTIMIZE="auto-optimize-startup"
+PLUGIN_MODE_STARTUP_CRASH_CHECK="startup-crash-check"
 PLUGIN_CONFIG_DIR="/boot/config/plugins/${PLUGIN_NAME}"
 PLUGIN_CONFIG_FILE="${PLUGIN_CONFIG_DIR}/settings.cfg"
 PLUGIN_STATE_DIR="${PLUGIN_CONFIG_DIR}/state"
@@ -702,11 +703,27 @@ require_dependencies() {
 }
 
 show_usage() {
-    echo "Usage: $0 [${PLUGIN_MODE_AUTO_OPTIMIZE}|${PLUGIN_MODE_STARTUP_AUTO_OPTIMIZE}]"
+    echo "Usage: $0 [${PLUGIN_MODE_AUTO_OPTIMIZE}|${PLUGIN_MODE_STARTUP_AUTO_OPTIMIZE}|${PLUGIN_MODE_STARTUP_CRASH_CHECK}]"
     echo
     echo "Modes:"
     echo "  ${PLUGIN_MODE_AUTO_OPTIMIZE}   Run configured PCIe power optimization"
     echo "  ${PLUGIN_MODE_STARTUP_AUTO_OPTIMIZE}   Internal startup mode (respects startup toggle/crash protection)"
+    echo "  ${PLUGIN_MODE_STARTUP_CRASH_CHECK}   Internal startup crash-state check and notification"
+}
+
+run_startup_crash_check() {
+    ensure_config_file || {
+        echo "Error: unable to initialize plugin config at ${PLUGIN_CONFIG_FILE}"
+        return 1
+    }
+    ensure_state_dir || {
+        echo "Error: unable to initialize plugin state at ${PLUGIN_STATE_DIR}"
+        return 1
+    }
+
+    load_settings_from_config
+    inspect_previous_run_for_crash
+    return 0
 }
 
 resolve_target_mode_for_device() {
@@ -1659,6 +1676,9 @@ case "$mode" in
         ;;
     "$PLUGIN_MODE_STARTUP_AUTO_OPTIMIZE")
         run_auto_optimize "$PLUGIN_MODE_STARTUP_AUTO_OPTIMIZE"
+        ;;
+    "$PLUGIN_MODE_STARTUP_CRASH_CHECK")
+        run_startup_crash_check
         ;;
     -h|--help|help)
         show_usage

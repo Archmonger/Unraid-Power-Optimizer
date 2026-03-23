@@ -214,7 +214,7 @@ run_metadata_cache_scan() {
     local target_path=$1
 
     if [[ ! -d "$target_path" ]]; then
-        echo "Metadata cache warmup skipped for ${target_path}: path not found."
+        echo "Filesystem cache skipped for ${target_path}: path not found."
         return 0
     fi
 
@@ -232,27 +232,27 @@ warm_disk_metadata_cache() {
     for disk_path in /mnt/disk*; do
         [[ -d "$disk_path" ]] || continue
         found_mount=1
-        echo "Starting metadata cache warmup scan for ${disk_path}."
+        echo "Starting filesystem cache scan for ${disk_path}."
         if run_metadata_cache_scan "$disk_path"; then
-            echo "Metadata cache warmup scan completed for ${disk_path}."
+            echo "Filesystem cache scan completed for ${disk_path}."
         else
-            echo "Metadata cache warmup scan failed for ${disk_path}."
+            echo "Filesystem cache scan failed for ${disk_path}."
         fi
     done
 
     if [[ "$found_mount" -eq 0 ]]; then
-        echo "Metadata cache warmup skipped: no /mnt/disk* mount paths found."
+        echo "Filesystem cache skipped: no /mnt/disk* mount paths found."
     fi
 }
 
 warm_user_share_metadata_cache() {
     local user_share_path="/mnt/user"
 
-    echo "Starting metadata cache warmup scan for ${user_share_path}."
+    echo "Starting filesystem cache scan for ${user_share_path}."
     if run_metadata_cache_scan "$user_share_path"; then
-        echo "Metadata cache warmup scan completed for ${user_share_path}."
+        echo "Filesystem cache scan completed for ${user_share_path}."
     else
-        echo "Metadata cache warmup scan failed for ${user_share_path}."
+        echo "Filesystem cache scan failed for ${user_share_path}."
     fi
 }
 
@@ -320,13 +320,13 @@ write_value_with_status \
 if [[ "$enable_disk_metadata_cache_warmup" -eq 1 ]]; then
     warm_disk_metadata_cache
 else
-    echo "Disk metadata cache warmup disabled; no /mnt/disk* cache scan performed."
+    echo "Disk filesystem cache disabled; no /mnt/disk* cache scan performed."
 fi
 
 if [[ "$enable_user_share_metadata_cache_warmup" -eq 1 ]]; then
     warm_user_share_metadata_cache
 else
-    echo "User share metadata cache warmup disabled; no /mnt/user cache scan performed."
+    echo "User share filesystem cache disabled; no /mnt/user cache scan performed."
 fi
 
 if [[ "$zfs_arc_min_percent" -eq 0 ]]; then

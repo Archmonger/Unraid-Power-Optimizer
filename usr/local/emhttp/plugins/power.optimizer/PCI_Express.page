@@ -115,7 +115,7 @@ Title="PCI Express"
         
         <p class="topology-note">
             One match pattern per line. Patterns are regular expressions used with Linux <code>bash</code> matching.
-            Examples: <code>NVIDIA</code>, <code>Ethernet|Network</code>, <code>^0000:01:</code>.
+            Examples: <code>NVIDIA</code>, <code>^0000:01:</code>, <code>Ethernet|Network</code>
         </p>
 
         <textarea id="blacklist-input" rows="8" spellcheck="false"></textarea>
