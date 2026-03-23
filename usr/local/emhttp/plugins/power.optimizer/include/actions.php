@@ -91,6 +91,8 @@ function default_settings(): array
         'ENABLE_USER_SHARE_METADATA_CACHE_WARMUP' => '0',
         'ZFS_ARC_MIN_PERCENT' => '10',
         'ZFS_ARC_MAX_PERCENT' => '40',
+        'THP_ENABLED_MODE' => 'madvise',
+        'THP_DEFRAG_MODE' => 'defer+madvise',
         'POWER_AWARE_CPU_SCHEDULER_MODE' => '2',
         'NUMA_BALANCING_TARGET' => '0',
     ];
@@ -519,6 +521,18 @@ function normalize_int_range($value, int $default, int $min, int $max): int
 function normalize_power_aware_scheduler_mode($value, int $default = 2): int
 {
     return normalize_int_range($value, $default, 0, 2);
+}
+
+function normalize_thp_enabled_mode($value, string $default = 'madvise'): string
+{
+    $normalized = strtolower(trim((string)$value));
+    return in_array($normalized, ['always', 'madvise', 'never'], true) ? $normalized : $default;
+}
+
+function normalize_thp_defrag_mode($value, string $default = 'defer+madvise'): string
+{
+    $normalized = strtolower(trim((string)$value));
+    return in_array($normalized, ['always', 'defer', 'defer+madvise', 'madvise', 'never'], true) ? $normalized : $default;
 }
 
 function power_aware_scheduler_mode_from_raw(array $raw): int
@@ -1102,6 +1116,8 @@ function system_tunables_settings_from_raw(array $raw): array
     $vfsCacheMaxAge = normalize_int_range($raw['VFS_CACHE_MAX_AGE'] ?? 60000, 60000, 1, 31536000);
     $zfsArcMinPercent = normalize_int_range($raw['ZFS_ARC_MIN_PERCENT'] ?? 10, 10, 0, 100);
     $zfsArcMaxPercent = normalize_int_range($raw['ZFS_ARC_MAX_PERCENT'] ?? 40, 40, 0, 100);
+    $thpEnabledMode = normalize_thp_enabled_mode($raw['THP_ENABLED_MODE'] ?? 'madvise', 'madvise');
+    $thpDefragMode = normalize_thp_defrag_mode($raw['THP_DEFRAG_MODE'] ?? 'defer+madvise', 'defer+madvise');
 
     if ($zfsArcMinPercent > 0 && $zfsArcMaxPercent > 0 && $zfsArcMinPercent > $zfsArcMaxPercent) {
         $zfsArcMinPercent = $zfsArcMaxPercent;
@@ -1122,6 +1138,8 @@ function system_tunables_settings_from_raw(array $raw): array
         'enable_user_share_metadata_cache_warmup' => normalize_boolean($raw['ENABLE_USER_SHARE_METADATA_CACHE_WARMUP'] ?? null, 0),
         'zfs_arc_min_percent' => $zfsArcMinPercent,
         'zfs_arc_max_percent' => $zfsArcMaxPercent,
+        'thp_enabled_mode' => $thpEnabledMode,
+        'thp_defrag_mode' => $thpDefragMode,
         'power_aware_cpu_scheduler_mode' => $schedulerMode,
         'disable_numa_balancing' => $numaBalancingTarget === 0 ? 1 : 0,
     ];
@@ -2126,6 +2144,8 @@ if ($action === 'save_system_tunables_settings') {
     $vfsCacheMaxAge = normalize_int_range($_POST['vfs_cache_max_age'] ?? 60000, 60000, 1, 31536000);
     $zfsArcMinPercent = normalize_int_range($_POST['zfs_arc_min_percent'] ?? 10, 10, 0, 100);
     $zfsArcMaxPercent = normalize_int_range($_POST['zfs_arc_max_percent'] ?? 40, 40, 0, 100);
+    $thpEnabledMode = normalize_thp_enabled_mode($_POST['thp_enabled_mode'] ?? 'madvise', 'madvise');
+    $thpDefragMode = normalize_thp_defrag_mode($_POST['thp_defrag_mode'] ?? 'defer+madvise', 'defer+madvise');
 
     if ($zfsArcMinPercent > 0 && $zfsArcMaxPercent > 0 && $zfsArcMinPercent > $zfsArcMaxPercent) {
         $zfsArcMinPercent = $zfsArcMaxPercent;
@@ -2148,6 +2168,8 @@ if ($action === 'save_system_tunables_settings') {
         'ENABLE_USER_SHARE_METADATA_CACHE_WARMUP' => (string)normalize_boolean($_POST['enable_user_share_metadata_cache_warmup'] ?? null, 0),
         'ZFS_ARC_MIN_PERCENT' => (string)$zfsArcMinPercent,
         'ZFS_ARC_MAX_PERCENT' => (string)$zfsArcMaxPercent,
+        'THP_ENABLED_MODE' => $thpEnabledMode,
+        'THP_DEFRAG_MODE' => $thpDefragMode,
         'POWER_AWARE_CPU_SCHEDULER_MODE' => (string)$schedulerMode,
     ];
 

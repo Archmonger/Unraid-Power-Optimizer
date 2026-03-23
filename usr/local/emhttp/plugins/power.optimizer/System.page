@@ -59,6 +59,26 @@ Title="System Tunables"
             </label>
 
             <label>
+                mm.transparent_hugepage.enabled<br>
+                <select id="thp-enabled-mode">
+                    <option value="always">always</option>
+                    <option value="madvise">madvise</option>
+                    <option value="never">never</option>
+                </select>
+            </label>
+
+            <label>
+                mm.transparent_hugepage.defrag<br>
+                <select id="thp-defrag-mode">
+                    <option value="always">always</option>
+                    <option value="defer">defer</option>
+                    <option value="defer+madvise">defer+madvise</option>
+                    <option value="madvise">madvise</option>
+                    <option value="never">never</option>
+                </select>
+            </label>
+
+            <label>
                 Audio codec power_save (seconds)<br>
                 <input type="number" id="audio-codec-power-save-seconds" min="0" max="60" step="1">
             </label>
@@ -171,6 +191,8 @@ input[type="number"] { width: 100%; }
     const zfsArcMinPercent = document.getElementById('zfs-arc-min-percent');
     const zfsArcMaxPercent = document.getElementById('zfs-arc-max-percent');
     const powerAwareSchedulerMode = document.getElementById('power-aware-cpu-scheduler-mode');
+    const thpEnabledMode = document.getElementById('thp-enabled-mode');
+    const thpDefragMode = document.getElementById('thp-defrag-mode');
     const disableNumaBalancing = document.getElementById('disable-numa-balancing');
 
     const saveButton = document.getElementById('system-save-button');
@@ -301,6 +323,8 @@ input[type="number"] { width: 100%; }
             zfs_arc_min_percent: zfsArcMinPercent.value,
             zfs_arc_max_percent: zfsArcMaxPercent.value,
             power_aware_cpu_scheduler_mode: powerAwareSchedulerMode.value,
+            thp_enabled_mode: thpEnabledMode.value,
+            thp_defrag_mode: thpDefragMode.value,
             disable_numa_balancing: disableNumaBalancing.checked ? '1' : '0'
         };
     }
@@ -340,6 +364,8 @@ input[type="number"] { width: 100%; }
             zfsArcMinPercent,
             zfsArcMaxPercent,
             powerAwareSchedulerMode,
+            thpEnabledMode,
+            thpDefragMode,
             disableNumaBalancing
         ].forEach(function (element) {
             element.addEventListener('change', updateSaveButtonState);
@@ -364,6 +390,8 @@ input[type="number"] { width: 100%; }
         enableUserShareMetadataCacheWarmup.checked = Number(settings.enable_user_share_metadata_cache_warmup ?? 0) === 1;
         zfsArcMinPercent.value = String(settings.zfs_arc_min_percent ?? 10);
         zfsArcMaxPercent.value = String(settings.zfs_arc_max_percent ?? 40);
+        thpEnabledMode.value = settings.thp_enabled_mode || 'madvise';
+        thpDefragMode.value = settings.thp_defrag_mode || 'defer+madvise';
 
         powerAwareSchedulerMode.value = String(settings.power_aware_cpu_scheduler_mode || 2);
         const disableNumaBalancingValue = settings.disable_numa_balancing ?? 1;

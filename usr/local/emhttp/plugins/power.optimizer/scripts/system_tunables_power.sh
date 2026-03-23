@@ -40,6 +40,20 @@ bool_from_string() {
     esac
 }
 
+thp_enabled_mode_from_string() {
+    case "${1,,}" in
+        always|madvise|never) echo "${1,,}" ;;
+        *) echo "madvise" ;;
+    esac
+}
+
+thp_defrag_mode_from_string() {
+    case "${1,,}" in
+        always|defer|defer+madvise|madvise|never) echo "${1,,}" ;;
+        *) echo "defer+madvise" ;;
+    esac
+}
+
 int_in_range() {
     local raw=$1
     local default_value=$2
@@ -111,6 +125,8 @@ enable_disk_metadata_cache_warmup=$(bool_from_string "$(read_config_value "ENABL
 enable_user_share_metadata_cache_warmup=$(bool_from_string "$(read_config_value "ENABLE_USER_SHARE_METADATA_CACHE_WARMUP" "0")")
 zfs_arc_min_percent=$(int_in_range "$(read_config_value "ZFS_ARC_MIN_PERCENT" "10")" 10 0 100)
 zfs_arc_max_percent=$(int_in_range "$(read_config_value "ZFS_ARC_MAX_PERCENT" "40")" 40 0 100)
+thp_enabled_mode=$(thp_enabled_mode_from_string "$(read_config_value "THP_ENABLED_MODE" "madvise")")
+thp_defrag_mode=$(thp_defrag_mode_from_string "$(read_config_value "THP_DEFRAG_MODE" "defer+madvise")")
 numa_balancing_target=$(int_in_range "$(read_config_value "NUMA_BALANCING_TARGET" "0")" 0 0 1)
 
 if [[ "$zfs_arc_min_percent" -gt 0 && "$zfs_arc_max_percent" -gt 0 && "$zfs_arc_min_percent" -gt "$zfs_arc_max_percent" ]]; then
@@ -143,7 +159,38 @@ echo "System setting ENABLE_DISK_METADATA_CACHE_WARMUP=${enable_disk_metadata_ca
 echo "System setting ENABLE_USER_SHARE_METADATA_CACHE_WARMUP=${enable_user_share_metadata_cache_warmup}."
 echo "System setting ZFS_ARC_MIN_PERCENT=${zfs_arc_min_percent}."
 echo "System setting ZFS_ARC_MAX_PERCENT=${zfs_arc_max_percent}."
+echo "System setting THP_ENABLED_MODE=${thp_enabled_mode}."
+echo "System setting THP_DEFRAG_MODE=${thp_defrag_mode}."
 echo "System setting NUMA_BALANCING_TARGET=${numa_balancing_target}."
+
+path_option_matches() {
+    local path=$1
+    local expected=$2
+    local current
+
+    [[ -r "$path" ]] || return 1
+
+    current=$(cat "$path" 2>/dev/null)
+    [[ "$current" == "$expected" || "$current" == *"[$expected]"* ]]
+}
+
+write_option_with_status() {
+    local path=$1
+    local value=$2
+    local success_message=$3
+    local failure_message=$4
+    local not_writable_message=$5
+
+    if [[ -w "$path" ]]; then
+        if echo "$value" > "$path" 2>/dev/null && path_option_matches "$path" "$value"; then
+            echo "$success_message"
+        else
+            echo "$failure_message"
+        fi
+    else
+        echo "$not_writable_message"
+    fi
+}
 
 write_value_with_status() {
     local path=$1
@@ -307,6 +354,20 @@ elif [[ "$system_memory_bytes" -gt 0 ]]; then
 else
     echo "Unable to read total system memory from /proc/meminfo; skipping zfs_arc_max tuning."
 fi
+
+write_option_with_status \
+    /sys/kernel/mm/transparent_hugepage/enabled \
+    "$thp_enabled_mode" \
+    "mm.transparent_hugepage.enabled set to ${thp_enabled_mode}." \
+    "Failed to set mm.transparent_hugepage.enabled to ${thp_enabled_mode}." \
+    "mm.transparent_hugepage.enabled path is not writable on this system."
+
+write_option_with_status \
+    /sys/kernel/mm/transparent_hugepage/defrag \
+    "$thp_defrag_mode" \
+    "mm.transparent_hugepage.defrag set to ${thp_defrag_mode}." \
+    "Failed to set mm.transparent_hugepage.defrag to ${thp_defrag_mode}." \
+    "mm.transparent_hugepage.defrag path is not writable on this system."
 
 write_value_with_status \
     /sys/devices/system/cpu/sched_mc_power_savings \
