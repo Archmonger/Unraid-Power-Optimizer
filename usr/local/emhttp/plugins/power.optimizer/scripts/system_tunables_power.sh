@@ -232,11 +232,11 @@ warm_disk_metadata_cache() {
     for disk_path in /mnt/disk*; do
         [[ -d "$disk_path" ]] || continue
         found_mount=1
-        echo "Starting filesystem cache scan for ${disk_path}."
+        echo "Starting filesystem caching for ${disk_path}."
         if run_metadata_cache_scan "$disk_path"; then
-            echo "Filesystem cache scan completed for ${disk_path}."
+            echo "Filesystem caching completed for ${disk_path}."
         else
-            echo "Filesystem cache scan failed for ${disk_path}."
+            echo "Filesystem caching failed for ${disk_path}."
         fi
     done
 
@@ -248,11 +248,11 @@ warm_disk_metadata_cache() {
 warm_user_share_metadata_cache() {
     local user_share_path="/mnt/user"
 
-    echo "Starting filesystem cache scan for ${user_share_path}."
+    echo "Starting filesystem caching for ${user_share_path}."
     if run_metadata_cache_scan "$user_share_path"; then
-        echo "Filesystem cache scan completed for ${user_share_path}."
+        echo "Filesystem caching completed for ${user_share_path}."
     else
-        echo "Filesystem cache scan failed for ${user_share_path}."
+        echo "Filesystem caching failed for ${user_share_path}."
     fi
 }
 
@@ -320,26 +320,13 @@ write_value_with_status \
 if [[ "$enable_disk_metadata_cache_warmup" -eq 1 ]]; then
     warm_disk_metadata_cache
 else
-    echo "Disk filesystem cache disabled; no /mnt/disk* cache scan performed."
+    echo "Disk filesystem cache disabled; no /mnt/disk* caching performed."
 fi
 
 if [[ "$enable_user_share_metadata_cache_warmup" -eq 1 ]]; then
     warm_user_share_metadata_cache
 else
-    echo "User share filesystem cache disabled; no /mnt/user cache scan performed."
-fi
-
-if [[ "$zfs_arc_min_percent" -eq 0 ]]; then
-    echo "ZFS ARC min percent is 0; keeping existing zfs_arc_min value."
-elif [[ "$system_memory_bytes" -gt 0 ]]; then
-    write_value_with_status \
-        /sys/module/zfs/parameters/zfs_arc_min \
-        "$zfs_arc_min_bytes" \
-        "zfs_arc_min set to ${zfs_arc_min_bytes} bytes (${zfs_arc_min_percent}% of RAM)." \
-        "Failed to set zfs_arc_min to ${zfs_arc_min_bytes} bytes (${zfs_arc_min_percent}% of RAM)." \
-        "zfs_arc_min path is not writable on this system."
-else
-    echo "Unable to read total system memory from /proc/meminfo; skipping zfs_arc_min tuning."
+    echo "User share filesystem cache disabled; no /mnt/user caching performed."
 fi
 
 if [[ "$zfs_arc_max_percent" -eq 0 ]]; then
@@ -353,6 +340,19 @@ elif [[ "$system_memory_bytes" -gt 0 ]]; then
         "zfs_arc_max path is not writable on this system."
 else
     echo "Unable to read total system memory from /proc/meminfo; skipping zfs_arc_max tuning."
+fi
+
+if [[ "$zfs_arc_min_percent" -eq 0 ]]; then
+    echo "ZFS ARC min percent is 0; keeping existing zfs_arc_min value."
+elif [[ "$system_memory_bytes" -gt 0 ]]; then
+    write_value_with_status \
+        /sys/module/zfs/parameters/zfs_arc_min \
+        "$zfs_arc_min_bytes" \
+        "zfs_arc_min set to ${zfs_arc_min_bytes} bytes (${zfs_arc_min_percent}% of RAM)." \
+        "Failed to set zfs_arc_min to ${zfs_arc_min_bytes} bytes (${zfs_arc_min_percent}% of RAM)." \
+        "zfs_arc_min path is not writable on this system."
+else
+    echo "Unable to read total system memory from /proc/meminfo; skipping zfs_arc_min tuning."
 fi
 
 write_option_with_status \
