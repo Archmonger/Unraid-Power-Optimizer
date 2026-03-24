@@ -8,21 +8,27 @@ Title="I2C"
         Configure I2C runtime power management separately from PCI Express tuning.
     </p>
 
-    <div class="grid">
-        <label class="toggle">
-            <input type="checkbox" id="i2c-auto-startup-toggle">
-            Auto Execute on Startup
-        </label>
+    <div class="settings-group">
+        <div class="grid">
+            <label class="toggle">
+                <input type="checkbox" id="i2c-auto-startup-toggle">
+                Auto Execute on Startup
+            </label>
+        </div>
+    </div>
 
-        <label>
-            I2C Runtime Power Management<br>
-            <select id="i2c-runtime-pm-mode"></select>
-        </label>
+    <div class="settings-group">
+        <div class="grid">
+            <label>
+                I2C Runtime Power Management<br>
+                <select id="i2c-runtime-pm-mode"></select>
+            </label>
 
-        <label>
-            I2C device glob (under /sys/bus/i2c/devices)<br>
-            <input type="text" id="i2c-device-glob" placeholder="i2c-*">
-        </label>
+            <label>
+                I2C device glob (under /sys/bus/i2c/devices)<br>
+                <input type="text" id="i2c-device-glob" placeholder="i2c-*">
+            </label>
+        </div>
     </div>
 
     <div class="row">
@@ -40,6 +46,7 @@ Title="I2C"
 
 <style>
 .power-section { max-width: 980px; }
+.settings-group { margin: 12px 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin: 10px 0; }
 .toggle { display: inline-flex; align-items: center; gap: 8px; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }

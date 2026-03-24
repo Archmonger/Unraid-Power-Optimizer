@@ -8,44 +8,50 @@ Title="Disks"
         Configure disk and controller runtime power settings with power-saving defaults.
     </p>
 
-    <div class="grid">
-        <label class="toggle">
-            <input type="checkbox" id="disks-auto-startup-toggle">
-            Auto Execute on Startup
-        </label>
+    <div class="settings-group">
+        <div class="grid">
+            <label class="toggle">
+                <input type="checkbox" id="disks-auto-startup-toggle">
+                Auto Execute on Startup
+            </label>
+        </div>
+    </div>
 
-        <label>
-            SATA Link Power Management policy<br>
-            <select id="sata-lpm-mode">
-                <option value="disabled">disabled</option>
-                <option value="min_power">min_power</option>
-                <option value="med_power_with_dipm">med_power_with_dipm</option>
-                <option value="max_performance">max_performance</option>
-            </select>
-        </label>
+    <div class="settings-group">
+        <div class="grid">
+            <label>
+                SATA Link Power Management policy<br>
+                <select id="sata-lpm-mode">
+                    <option value="disabled">disabled</option>
+                    <option value="min_power">min_power</option>
+                    <option value="med_power_with_dipm">med_power_with_dipm</option>
+                    <option value="max_performance">max_performance</option>
+                </select>
+            </label>
 
-        <label>
-            Disk Power Management<br>
-            <select id="disk-runtime-pm-mode"></select>
-        </label>
+            <label>
+                Disk Power Management<br>
+                <select id="disk-runtime-pm-mode"></select>
+            </label>
 
-        <label>
-            ATA Power Management<br>
-            <select id="ata-runtime-pm-mode"></select>
-        </label>
+            <label>
+                ATA Power Management<br>
+                <select id="ata-runtime-pm-mode"></select>
+            </label>
 
-        <label>
-            NVMe Autonomous Power State Transition<br>
-            <select id="nvme-apst-mode">
-                <option value="enabled">enabled</option>
-                <option value="disabled">disabled</option>
-            </select>
-        </label>
+            <label>
+                NVMe Autonomous Power State Transition<br>
+                <select id="nvme-apst-mode">
+                    <option value="enabled">enabled</option>
+                    <option value="disabled">disabled</option>
+                </select>
+            </label>
 
-        <label>
-            NVMe Runtime Power Management<br>
-            <select id="nvme-runtime-pm-mode"></select>
-        </label>
+            <label>
+                NVMe Runtime Power Management<br>
+                <select id="nvme-runtime-pm-mode"></select>
+            </label>
+        </div>
     </div>
 
     <div class="row">
@@ -64,6 +70,7 @@ Title="Disks"
 
 <style>
 .power-section { max-width: 980px; }
+.settings-group { margin: 12px 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin: 10px 0; }
 .toggle { display: inline-flex; align-items: center; gap: 8px; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }

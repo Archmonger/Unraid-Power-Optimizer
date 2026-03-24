@@ -14,76 +14,82 @@ Title="PCI Express"
     </p>
 
     <div markdown="1" class="notice warning">
-    "ASPM" power optimizations must be enabled in your BIOS prior to running this script.
+    "ASPM" must be enabled in your BIOS prior to using these power optimizations!
     </div>
 
-    <div class="settings-grid">
-        <label>
-            <strong>Operation Mode</strong><br>
-            <select id="operation-mode">
-                <option value="automatic">auto</option>
-                <option value="manual">manual</option>
-            </select>
-        </label>
+    <div class="settings-group">
+        <div class="settings-grid">
+            <label class="toggle-option">
+                <input type="checkbox" id="auto-startup-toggle">
+                Auto Execute on Startup
+            </label>
 
-        <label class="auto-only-control">
-            <strong>Max PCI Express ASPM level</strong><br>
-            <select id="max-aspm-level">
-                <option value="1">L0s</option>
-                <option value="2">L1</option>
-                <option value="3" selected>L0s &amp; L1</option>
-            </select>
-        </label>
+            <label class="toggle-option auto-only-control">
+                <input type="checkbox" id="enable-aspm-optimization" checked>
+                Enable ASPM Optimization
+            </label>
 
-        <label class="auto-only-control">
-            <strong>Force ASPM on unsupported endpoints</strong><br>
-            <select id="force-aspm-endpoint-mode">
-                <option value="0" selected>disabled</option>
-                <option value="1">L0s</option>
-                <option value="2">L1</option>
-                <option value="3">L0s &amp; L1</option>
-            </select>
-        </label>
+            <label class="toggle-option auto-only-control">
+                <input type="checkbox" id="enable-clkpm-optimization" checked>
+                Enable CLKPM Optimization
+            </label>
 
-        <label class="auto-only-control">
-            <strong>Force ASPM on unsupported bridges</strong><br>
-            <select id="force-aspm-bridge-mode">
-                <option value="0" selected>disabled</option>
-                <option value="1">L0s</option>
-                <option value="2">L1</option>
-                <option value="3">L0s &amp; L1</option>
-            </select>
-        </label>
+            <label class="toggle-option auto-only-control">
+                <input type="checkbox" id="enable-ltr-optimization" checked>
+                Enable LTR Optimization
+            </label>
 
-        <label class="toggle-option">
-            <input type="checkbox" id="auto-startup-toggle">
-            Auto Execute on Startup
-        </label>
+            <label class="toggle-option auto-only-control">
+                <input type="checkbox" id="enable-l1ss-optimization">
+                Enable L1SS Optimization
+            </label>
 
-        <label class="toggle-option auto-only-control">
-            <input type="checkbox" id="enable-aspm-optimization" checked>
-            Enable ASPM Optimization
-        </label>
+            <label class="toggle-option auto-only-control">
+                <input type="checkbox" id="enable-pci-runtime-pm-optimization" checked>
+                Enable PCI Runtime Power Management
+            </label>
+        </div>
+    </div>
 
-        <label class="toggle-option auto-only-control">
-            <input type="checkbox" id="enable-clkpm-optimization" checked>
-            Enable CLKPM Optimization
-        </label>
+    <div class="settings-group">
+        <div class="settings-grid">
+            <label>
+                <strong>Operation Mode</strong><br>
+                <select id="operation-mode">
+                    <option value="automatic">auto</option>
+                    <option value="manual">manual</option>
+                </select>
+            </label>
 
-        <label class="toggle-option auto-only-control">
-            <input type="checkbox" id="enable-ltr-optimization" checked>
-            Enable LTR Optimization
-        </label>
+            <label class="auto-only-control">
+                <strong>Max PCI Express ASPM level</strong><br>
+                <select id="max-aspm-level">
+                    <option value="1">L0s</option>
+                    <option value="2">L1</option>
+                    <option value="3" selected>L0s &amp; L1</option>
+                </select>
+            </label>
 
-        <label class="toggle-option auto-only-control">
-            <input type="checkbox" id="enable-l1ss-optimization">
-            Enable L1SS Optimization (requires strict multi-level compatibility)
-        </label>
+            <label class="auto-only-control">
+                <strong>Force ASPM on unsupported endpoints</strong><br>
+                <select id="force-aspm-endpoint-mode">
+                    <option value="0" selected>disabled</option>
+                    <option value="1">L0s</option>
+                    <option value="2">L1</option>
+                    <option value="3">L0s &amp; L1</option>
+                </select>
+            </label>
 
-        <label class="toggle-option auto-only-control">
-            <input type="checkbox" id="enable-pci-runtime-pm-optimization" checked>
-            Enable PCI Runtime Power Management
-        </label>
+            <label class="auto-only-control">
+                <strong>Force ASPM on unsupported bridges</strong><br>
+                <select id="force-aspm-bridge-mode">
+                    <option value="0" selected>disabled</option>
+                    <option value="1">L0s</option>
+                    <option value="2">L1</option>
+                    <option value="3">L0s &amp; L1</option>
+                </select>
+            </label>
+        </div>
     </div>
 
     <div class="button-row">
@@ -178,6 +184,10 @@ Title="PCI Express"
 <style>
 .power-optimizer-settings {
     max-width: 1300px;
+}
+
+.settings-group {
+    margin: 12px 0;
 }
 
 .settings-grid {

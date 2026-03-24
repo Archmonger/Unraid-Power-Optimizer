@@ -10,9 +10,7 @@ Title="Home"
         However, this plug-in cannot gaurantee perfect operation since hardware and firmware behavior vary between systems.
     </p>
 
-    <div markdown="1" class="notice warning">
-    Backups are strongly recommended as a precaution before enabling aggressive power tuning.
-    </div>
+    <hr>
 
     <div class="home-grid">
         <div class="home-card">

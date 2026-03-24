@@ -8,34 +8,40 @@ Title="USB"
         Configure USB autosuspend and runtime power management controls.
     </p>
 
-    <div class="grid">
-        <label class="toggle">
-            <input type="checkbox" id="usb-auto-startup-toggle">
-            Auto Execute on Startup
-        </label>
+    <div class="settings-group">
+        <div class="grid">
+            <label class="toggle">
+                <input type="checkbox" id="usb-auto-startup-toggle">
+                Auto Execute on Startup
+            </label>
 
-        <label class="toggle">
-            <input type="checkbox" id="enable-usb-autosuspend-optimization" checked>
-            Enable USB Autosuspend Optimization
-        </label>
+            <label class="toggle">
+                <input type="checkbox" id="enable-usb-autosuspend-optimization" checked>
+                Enable USB Autosuspend Optimization
+            </label>
 
-        <label class="toggle">
-            <input type="checkbox" id="enable-usb-wakeup-optimization" checked>
-            Enable USB Wakeup Optimization
-        </label>
+            <label class="toggle">
+                <input type="checkbox" id="enable-usb-wakeup-optimization" checked>
+                Enable USB Wakeup Optimization
+            </label>
+        </div>
+    </div>
 
-        <label>
-            USB Runtime Power Management<br>
-            <select id="usb-runtime-pm-target">
-                <option value="disabled">disabled</option>
-                <option value="auto">auto</option>
-            </select>
-        </label>
+    <div class="settings-group">
+        <div class="grid">
+            <label>
+                USB Runtime Power Management<br>
+                <select id="usb-runtime-pm-target">
+                    <option value="disabled">disabled</option>
+                    <option value="auto">auto</option>
+                </select>
+            </label>
 
-        <label>
-            USB device glob (relative to /sys/bus/usb/devices)<br>
-            <input type="text" id="usb-device-glob" placeholder="*">
-        </label>
+            <label>
+                USB device glob (relative to /sys/bus/usb/devices)<br>
+                <input type="text" id="usb-device-glob" placeholder="*">
+            </label>
+        </div>
     </div>
 
     <div class="row">
@@ -53,6 +59,7 @@ Title="USB"
 
 <style>
 .power-section { max-width: 980px; }
+.settings-group { margin: 12px 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin: 10px 0; }
 .toggle { display: inline-flex; align-items: center; gap: 8px; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
