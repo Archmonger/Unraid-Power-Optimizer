@@ -1,3 +1,5 @@
 **Power Optimizer**
 
-Power Optimizer provides power tuning controls for all key subsystems in one place. Note: Some power optimizations depend on BIOS support.
+A one-stop shop for power tuning controls across all key subsystems such as CPU, memory, PCIe devices, and disks.
+
+Note: Some power optimizations depend on BIOS support.

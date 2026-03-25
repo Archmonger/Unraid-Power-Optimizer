@@ -1,0 +1,163 @@
+#!/bin/bash
+
+POWER_OPTIMIZER_SAS_HOOK=1
+SAS_SPUNDOWN_SENSE_RE='(standby condition activated|notify \(enable spinup\) required)'
+BACKUP_SDSPIN="/usr/local/sbin/sdspin.unraid"
+
+find_executable() {
+    local path
+
+    for path in "$@"; do
+        if [[ -x "$path" ]]; then
+            echo "$path"
+            return 0
+        fi
+    done
+
+    echo ""
+    return 1
+}
+
+HDPARM_BIN=$(find_executable /usr/sbin/hdparm /sbin/hdparm)
+SG_START_BIN=$(find_executable /usr/bin/sg_start /bin/sg_start)
+SDPARM_BIN=$(find_executable /usr/sbin/sdparm /usr/bin/sdparm)
+
+call_backup_sdspin() {
+    if [[ -x "$BACKUP_SDSPIN" ]]; then
+        "$BACKUP_SDSPIN" "$@"
+        return $?
+    fi
+
+    return 1
+}
+
+is_rotational() {
+    local device_path=$1
+    local short_device=${device_path##*/}
+    local rotational_path="/sys/block/${short_device}/queue/rotational"
+
+    [[ -r "$rotational_path" ]] || return 1
+    [[ "$(cat "$rotational_path" 2>/dev/null)" == "1" ]]
+}
+
+is_sas() {
+    local device_path=$1
+    local output
+
+    [[ -n "$SDPARM_BIN" ]] || return 1
+
+    output=$($SDPARM_BIN -ip di_target "$device_path" 2>&1)
+    [[ ${output,,} =~ transport:\ serial\ attached\ scsi ]]
+}
+
+sas_is_spun_down() {
+    local device_path=$1
+    local output
+
+    [[ -n "$SDPARM_BIN" ]] || return 1
+
+    output=$($SDPARM_BIN -C sense "$device_path" 2>&1)
+    [[ $? -eq 0 ]] || return 1
+    [[ ${output,,} =~ $SAS_SPUNDOWN_SENSE_RE ]]
+}
+
+spin_down_via_hdparm() {
+    [[ -n "$HDPARM_BIN" ]] || return 1
+    "$HDPARM_BIN" -y "$1" >/dev/null 2>&1
+}
+
+spin_up_via_hdparm() {
+    [[ -n "$HDPARM_BIN" ]] || return 1
+    "$HDPARM_BIN" -S0 "$1" >/dev/null 2>&1
+}
+
+status_via_hdparm() {
+    local output
+
+    [[ -n "$HDPARM_BIN" ]] || return 1
+
+    output=$($HDPARM_BIN -C "$1" 2>&1)
+    [[ $? -eq 0 ]] || return 1
+
+    if [[ ${output,,} =~ standby ]] && [[ ! ${output,,} =~ bad/missing\ sense ]]; then
+        return 2
+    fi
+
+    return 0
+}
+
+main() {
+    local device_arg=$1
+    local operation=${2,,}
+    local device_path
+
+    if [[ -z "$operation" ]]; then
+        operation="status"
+    fi
+
+    if [[ -z "$device_arg" ]]; then
+        call_backup_sdspin "$@" && return $?
+        return 1
+    fi
+
+    device_path="/dev/${device_arg#/dev/}"
+    if [[ ! -b "$device_path" ]]; then
+        call_backup_sdspin "$@" && return $?
+        return 1
+    fi
+
+    if ! is_sas "$device_path" || ! is_rotational "$device_path"; then
+        if call_backup_sdspin "$@"; then
+            return $?
+        fi
+
+        case "$operation" in
+            up)
+                spin_up_via_hdparm "$device_path"
+                return $?
+                ;;
+            down)
+                spin_down_via_hdparm "$device_path"
+                return $?
+                ;;
+            status|"")
+                status_via_hdparm "$device_path"
+                return $?
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+    fi
+
+    case "$operation" in
+        up)
+            [[ -n "$SG_START_BIN" ]] || return 1
+
+            "$SG_START_BIN" --readonly --pc=1 "$device_path" >/dev/null 2>&1 && return 0
+            "$SG_START_BIN" --start --readonly "$device_path" >/dev/null 2>&1
+            return $?
+            ;;
+        down)
+            [[ -n "$SG_START_BIN" ]] || return 1
+
+            "$SG_START_BIN" --readonly --pc=3 "$device_path" >/dev/null 2>&1
+            return $?
+            ;;
+        status|"")
+            if sas_is_spun_down "$device_path"; then
+                return 2
+            fi
+
+            [[ -n "$SDPARM_BIN" ]] || return 1
+            "$SDPARM_BIN" -C sense "$device_path" >/dev/null 2>&1
+            return $?
+            ;;
+        *)
+            call_backup_sdspin "$@" && return $?
+            return 1
+            ;;
+    esac
+}
+
+main "$@"

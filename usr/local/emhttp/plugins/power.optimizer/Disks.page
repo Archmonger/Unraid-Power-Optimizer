@@ -14,6 +14,11 @@ Title="Disks"
                 <input type="checkbox" id="disks-auto-startup-toggle">
                 Auto Execute on Startup
             </label>
+
+            <label class="toggle">
+                <input type="checkbox" id="disks-allow-sas-spin-down-toggle">
+                Allow Unraid to Spin Down SAS Drives
+            </label>
         </div>
     </div>
 
@@ -111,6 +116,7 @@ Title="Disks"
     const executionLogPollMs = 1000;
 
     const autoStartupToggle = document.getElementById('disks-auto-startup-toggle');
+    const allowSasSpinDownToggle = document.getElementById('disks-allow-sas-spin-down-toggle');
     const sataLpmMode = document.getElementById('sata-lpm-mode');
     const diskRuntimePmMode = document.getElementById('disk-runtime-pm-mode');
     const ataRuntimePmMode = document.getElementById('ata-runtime-pm-mode');
@@ -234,12 +240,25 @@ Title="Disks"
     function collectSettingsPayload() {
         return {
             auto_execute_on_startup: autoStartupToggle.checked ? '1' : '0',
+            allow_unraid_to_spin_down_sas_drives: allowSasSpinDownToggle.checked ? '1' : '0',
             sata_lpm_mode: sataLpmMode.value,
             disk_runtime_pm_mode: diskRuntimePmMode.value,
             ata_runtime_pm_mode: ataRuntimePmMode.value,
             nvme_apst_mode: nvmeApstMode.value,
             nvme_runtime_pm_mode: nvmeRuntimePmMode.value,
         };
+    }
+
+    function updateSasAvailability(capabilities) {
+        const supportsHook = Number(capabilities.supports_sas_spindown_hook || 0) === 1;
+
+        if (!supportsHook) {
+            allowSasSpinDownToggle.checked = false;
+            allowSasSpinDownToggle.disabled = true;
+            return;
+        }
+
+        allowSasSpinDownToggle.disabled = false;
     }
 
     function normalizeRuntimeTargets(values) {
@@ -306,7 +325,7 @@ Title="Disks"
     }
 
     function registerDirtyTracking() {
-        [autoStartupToggle, sataLpmMode, diskRuntimePmMode, ataRuntimePmMode, nvmeApstMode, nvmeRuntimePmMode].forEach(function (element) {
+        [autoStartupToggle, allowSasSpinDownToggle, sataLpmMode, diskRuntimePmMode, ataRuntimePmMode, nvmeApstMode, nvmeRuntimePmMode].forEach(function (element) {
             element.addEventListener('change', updateSaveButtonState);
             element.addEventListener('input', updateSaveButtonState);
         });
@@ -319,6 +338,7 @@ Title="Disks"
         state.nvmeRuntimePmTargets = normalizeRuntimeTargets(caps.nvme_runtime_pm_targets);
 
         autoStartupToggle.checked = Number(settings.auto_execute_on_startup || 0) === 1;
+        allowSasSpinDownToggle.checked = Number(settings.allow_unraid_to_spin_down_sas_drives || 1) === 1;
         sataLpmMode.value = settings.sata_lpm_mode || 'min_power';
 
         populateRuntimePmSelect(
@@ -342,6 +362,8 @@ Title="Disks"
             state.nvmeRuntimePmTargets,
             settings.nvme_runtime_pm_mode || 'auto'
         );
+
+        updateSasAvailability(caps);
 
         markSettingsSaved();
     }

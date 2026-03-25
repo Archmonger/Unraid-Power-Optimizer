@@ -61,6 +61,7 @@ function default_settings(): array
         'ATA_RUNTIME_PM_MODE' => 'auto',
         'NVME_APST_MODE' => 'enabled',
         'NVME_RUNTIME_PM_MODE' => 'auto',
+        'ALLOW_UNRAID_TO_SPIN_DOWN_SAS_DRIVES' => '1',
 
         'USB_MODE' => 'automatic',
         'USB_AUTO_EXECUTE_ON_STARTUP' => '0',
@@ -599,6 +600,36 @@ function discover_runtime_pm_targets(array $globPatterns): array
     return normalize_runtime_target_list($targets);
 }
 
+function executable_exists_in_paths(array $paths): bool
+{
+    foreach ($paths as $path) {
+        if (is_executable($path)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function native_sas_spindown_supported(): bool
+{
+    $sdspinPath = '/usr/local/sbin/sdspin';
+    if (!is_readable($sdspinPath)) {
+        return false;
+    }
+
+    $contents = @file_get_contents($sdspinPath);
+    if ($contents === false) {
+        return false;
+    }
+
+    if (strpos((string)$contents, 'POWER_OPTIMIZER_SAS_HOOK=1') !== false) {
+        return false;
+    }
+
+    return preg_match('/sg_start|sdparm|serial attached scsi|standby_z|issas/i', (string)$contents) === 1;
+}
+
 function cpu_capabilities(): array
 {
     $allowed = ['powersave', 'ondemand', 'conservative', 'schedutil', 'performance'];
@@ -860,6 +891,10 @@ function cpu_live_statistics(): array
 
 function disks_runtime_pm_capabilities(): array
 {
+    $hasSdspin = is_file('/usr/local/sbin/sdspin') && is_readable('/usr/local/sbin/sdspin');
+    $hasSgStart = executable_exists_in_paths(['/usr/bin/sg_start', '/bin/sg_start']);
+    $hasSdparm = executable_exists_in_paths(['/usr/sbin/sdparm', '/usr/bin/sdparm']);
+
     return [
         'disk_runtime_pm_targets' => discover_runtime_pm_targets(['/sys/block/sd*/device/power/control']),
         'ata_runtime_pm_targets' => discover_runtime_pm_targets(['/sys/bus/pci/devices/????:??:??.?/ata*/power/control']),
@@ -870,6 +905,8 @@ function disks_runtime_pm_capabilities(): array
             '/sys/class/nvme-fabrics/ctl/power/control',
             '/sys/class/nvme-fabrics/ctl*/power/control',
         ]),
+        'supports_sas_spindown_hook' => $hasSdspin && $hasSgStart && $hasSdparm,
+        'native_sas_spindown_supported' => native_sas_spindown_supported(),
     ];
 }
 
@@ -1019,11 +1056,7 @@ function ethernet_settings_from_raw(array $raw): array
 
 function disks_settings_from_raw(array $raw): array
 {
-    $capabilities = [
-        'disk_runtime_pm_targets' => ['auto'],
-        'ata_runtime_pm_targets' => ['auto'],
-        'nvme_runtime_pm_targets' => ['auto'],
-    ];
+    $capabilities = disks_runtime_pm_capabilities();
     $sataMode = sata_lpm_mode_from_raw($raw);
     $diskMode = normalize_disks_runtime_pm_mode(
         runtime_pm_mode_from_raw($raw, 'DISK_RUNTIME_PM_MODE', 'auto'),
@@ -1041,6 +1074,7 @@ function disks_settings_from_raw(array $raw): array
 
     return [
         'auto_execute_on_startup' => normalize_boolean($raw['DISKS_AUTO_EXECUTE_ON_STARTUP'] ?? null, 0),
+        'allow_unraid_to_spin_down_sas_drives' => normalize_boolean($raw['ALLOW_UNRAID_TO_SPIN_DOWN_SAS_DRIVES'] ?? null, 1),
         'disks_mode' => normalize_mode($raw['DISKS_MODE'] ?? 'automatic', 'automatic'),
         'sata_lpm_mode' => $sataMode,
         'disk_runtime_pm_mode' => $diskMode,
@@ -1980,6 +2014,7 @@ if ($action === 'save_disks_settings') {
     $updates = [
         'DISKS_MODE' => 'automatic',
         'DISKS_AUTO_EXECUTE_ON_STARTUP' => (string)normalize_boolean($_POST['auto_execute_on_startup'] ?? null, 0),
+        'ALLOW_UNRAID_TO_SPIN_DOWN_SAS_DRIVES' => (string)normalize_boolean($_POST['allow_unraid_to_spin_down_sas_drives'] ?? null, 1),
         'SATA_LPM_MODE' => $sataMode,
         'DISK_RUNTIME_PM_MODE' => $diskMode,
         'ATA_RUNTIME_PM_MODE' => $ataMode,

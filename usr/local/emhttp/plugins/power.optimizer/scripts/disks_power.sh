@@ -10,6 +10,10 @@ enable_timestamped_output
 
 PLUGIN_NAME="power.optimizer"
 PLUGIN_CONFIG_FILE="/boot/config/plugins/${PLUGIN_NAME}/settings.cfg"
+SAS_SDSPIN_TARGET="/usr/local/sbin/sdspin"
+SAS_SDSPIN_BACKUP="/usr/local/sbin/sdspin.unraid"
+SAS_SDSPIN_SOURCE="/usr/local/emhttp/plugins/${PLUGIN_NAME}/scripts/sdspin.power-optimizer"
+SAS_SDSPIN_MARKER="POWER_OPTIMIZER_SAS_HOOK=1"
 
 read_config_value() {
     local key=$1
@@ -63,6 +67,98 @@ nvme_apst_mode_from_string() {
     esac
 }
 
+script_has_native_sas_spindown_support() {
+    local script_path=$1
+
+    [[ -r "$script_path" ]] || return 1
+    if grep -q "$SAS_SDSPIN_MARKER" "$script_path" 2>/dev/null; then
+        return 1
+    fi
+
+    grep -Eiq 'sg_start|sdparm|serial attached scsi|standby_z|issas' "$script_path" 2>/dev/null
+}
+
+is_power_optimizer_sdspin_installed() {
+    [[ -r "$SAS_SDSPIN_TARGET" ]] && grep -q "$SAS_SDSPIN_MARKER" "$SAS_SDSPIN_TARGET" 2>/dev/null
+}
+
+restore_unraid_sdspin_if_needed() {
+    if ! is_power_optimizer_sdspin_installed; then
+        return 0
+    fi
+
+    if [[ ! -r "$SAS_SDSPIN_BACKUP" ]]; then
+        echo "SAS compatibility hook is active, but ${SAS_SDSPIN_BACKUP} is missing; keeping current sdspin script."
+        return 0
+    fi
+
+    mv -f "$SAS_SDSPIN_BACKUP" "$SAS_SDSPIN_TARGET" 2>/dev/null || {
+        echo "Failed to restore native sdspin from ${SAS_SDSPIN_BACKUP}."
+        return 1
+    }
+
+    echo "Restored native sdspin from ${SAS_SDSPIN_BACKUP}."
+}
+
+install_sas_sdspin_hook() {
+    if [[ ! -r "$SAS_SDSPIN_TARGET" ]]; then
+        echo "SAS compatibility hook unavailable: missing ${SAS_SDSPIN_TARGET}."
+        return 0
+    fi
+
+    if [[ ! -x "$SAS_SDSPIN_SOURCE" ]]; then
+        echo "SAS compatibility hook unavailable: missing executable ${SAS_SDSPIN_SOURCE}."
+        return 0
+    fi
+
+    if [[ ! -x "/usr/bin/sg_start" ]] && [[ ! -x "/bin/sg_start" ]]; then
+        echo "SAS compatibility hook unavailable: sg_start binary not found."
+        return 0
+    fi
+
+    if [[ ! -x "/usr/sbin/sdparm" ]] && [[ ! -x "/usr/bin/sdparm" ]]; then
+        echo "SAS compatibility hook unavailable: sdparm binary not found."
+        return 0
+    fi
+
+    if script_has_native_sas_spindown_support "$SAS_SDSPIN_TARGET"; then
+        echo "Native SAS spin-down support detected in ${SAS_SDSPIN_TARGET}; compatibility hook is a no-op."
+        return 0
+    fi
+
+    if is_power_optimizer_sdspin_installed; then
+        echo "SAS compatibility hook already active."
+        return 0
+    fi
+
+    if [[ ! -e "$SAS_SDSPIN_BACKUP" ]]; then
+        cp -p "$SAS_SDSPIN_TARGET" "$SAS_SDSPIN_BACKUP" 2>/dev/null || {
+            echo "Failed to back up native sdspin to ${SAS_SDSPIN_BACKUP}."
+            return 1
+        }
+        echo "Backed up native sdspin to ${SAS_SDSPIN_BACKUP}."
+    fi
+
+    cp -f "$SAS_SDSPIN_SOURCE" "$SAS_SDSPIN_TARGET" 2>/dev/null || {
+        echo "Failed to install SAS compatibility hook to ${SAS_SDSPIN_TARGET}."
+        return 1
+    }
+
+    chmod 755 "$SAS_SDSPIN_TARGET" 2>/dev/null || true
+    echo "Installed SAS compatibility hook to ${SAS_SDSPIN_TARGET}."
+}
+
+configure_sas_sdspin_hook() {
+    local allow_sas_spindown=$1
+
+    if [[ "$allow_sas_spindown" -eq 1 ]]; then
+        install_sas_sdspin_hook
+        return 0
+    fi
+
+    restore_unraid_sdspin_if_needed
+}
+
 sata_mode=$(sata_lpm_mode_from_string "$(read_config_value "SATA_LPM_MODE" "min_power")")
 disks_auto_startup=$(bool_from_string "$(read_config_value "DISKS_AUTO_EXECUTE_ON_STARTUP" "0")")
 
@@ -70,6 +166,7 @@ disk_mode=$(runtime_pm_mode_from_string "$(read_config_value "DISK_RUNTIME_PM_MO
 ata_mode=$(runtime_pm_mode_from_string "$(read_config_value "ATA_RUNTIME_PM_MODE" "auto")")
 nvme_apst_mode=$(nvme_apst_mode_from_string "$(read_config_value "NVME_APST_MODE" "enabled")")
 nvme_runtime_pm_mode=$(runtime_pm_mode_from_string "$(read_config_value "NVME_RUNTIME_PM_MODE" "auto")")
+allow_sas_spindown=$(bool_from_string "$(read_config_value "ALLOW_UNRAID_TO_SPIN_DOWN_SAS_DRIVES" "0")")
 
 echo "Disks setting DISKS_AUTO_EXECUTE_ON_STARTUP=${disks_auto_startup}."
 echo "Disks setting SATA_LPM_MODE=${sata_mode}."
@@ -77,6 +174,7 @@ echo "Disks setting DISK_RUNTIME_PM_MODE=${disk_mode}."
 echo "Disks setting ATA_RUNTIME_PM_MODE=${ata_mode}."
 echo "Disks setting NVME_APST_MODE=${nvme_apst_mode}."
 echo "Disks setting NVME_RUNTIME_PM_MODE=${nvme_runtime_pm_mode}."
+echo "Disks setting ALLOW_UNRAID_TO_SPIN_DOWN_SAS_DRIVES=${allow_sas_spindown}."
 
 collect_sysfs_paths() {
     local -a matched_paths=()
@@ -310,6 +408,8 @@ if [[ "$sata_mode" != "disabled" ]]; then
 else
     echo "SATA link power management policy disabled; no SATA LPM changes applied."
 fi
+
+configure_sas_sdspin_hook "$allow_sas_spindown"
 
 if [[ "$disk_mode" != "disabled" ]]; then
     apply_runtime_pm_mode "Disk runtime PM" "$disk_mode" \

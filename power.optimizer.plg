@@ -115,6 +115,7 @@ required_files=(
   "$STAGING_DIR/Disks.page"
   "$STAGING_DIR/include/actions.php"
   "$STAGING_DIR/scripts/disks_power.sh"
+  "$STAGING_DIR/scripts/sdspin.power-optimizer"
 )
 for required_file in "${required_files[@]}"; do
   if [[ ! -f "$required_file" ]]; then
@@ -137,6 +138,7 @@ chmod 755 \
   "$STAGING_DIR/scripts/cpu_power.sh" \
   "$STAGING_DIR/scripts/ethernet_power.sh" \
   "$STAGING_DIR/scripts/disks_power.sh" \
+  "$STAGING_DIR/scripts/sdspin.power-optimizer" \
   "$STAGING_DIR/scripts/disks_spin_down_all.sh" \
   "$STAGING_DIR/scripts/usb_power.sh" \
   "$STAGING_DIR/scripts/i2c_power.sh" \
@@ -182,6 +184,7 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     echo 'ATA_RUNTIME_PM_MODE="auto"'
     echo 'NVME_APST_MODE="enabled"'
     echo 'NVME_RUNTIME_PM_MODE="auto"'
+    echo 'ALLOW_UNRAID_TO_SPIN_DOWN_SAS_DRIVES="1"'
 
     echo 'USB_MODE="automatic"'
     echo 'USB_AUTO_EXECUTE_ON_STARTUP="0"'
