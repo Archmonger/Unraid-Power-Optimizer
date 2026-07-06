@@ -1635,6 +1635,7 @@ function edit_syslinux_aspm_config(string $syslinuxFile): array
     }
 
     $params = [
+        'i915.enable_rc6=1',
         'pcie_aspm=force',
         'pcie_aspm.policy=powersupersave',
         'pcie_port_pm=force',
