@@ -12,6 +12,6 @@ from servestatic import ServeStaticASGI
 app = ServeStaticASGI(None, root=Path(__file__).parent.parent, autorefresh=True)
 
 # To run the server, execute the following command in the terminal:
-# cd scripts && uvicorn webserver:app --host
+# cd scripts && uvicorn webserver:app --host 0.0.0.0
 #
 # Now, you can install "http://<server_ip>:<port>/power.optimizer-local.plg" as a plugin within Unraid and it will pull the supporting files from this server.

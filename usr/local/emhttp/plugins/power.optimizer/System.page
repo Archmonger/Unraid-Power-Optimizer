@@ -104,18 +104,8 @@ Title="System Tunables"
             </label>
 
             <label>
-                vm.vfs_cache_max_age<br>
+                vm.vfs_cache_max_age
                 <input type="number" id="vfs-cache-max-age" min="1" max="31536000" step="1">
-            </label>
-
-            <label>
-                zfs_arc_min (% of RAM, 0 to disable)<br>
-                <input type="number" id="zfs-arc-min-percent" min="0" max="100" step="1">
-            </label>
-
-            <label>
-                zfs_arc_max (% of RAM, 0 to disable)<br>
-                <input type="number" id="zfs-arc-max-percent" min="0" max="100" step="1">
             </label>
         </div>
     </div>
@@ -188,8 +178,6 @@ input[type="number"] { width: 100%; }
     const vfsCacheMaxAge = document.getElementById('vfs-cache-max-age');
     const enableDiskMetadataCacheWarmup = document.getElementById('enable-disk-metadata-cache-warmup');
     const enableUserShareMetadataCacheWarmup = document.getElementById('enable-user-share-metadata-cache-warmup');
-    const zfsArcMinPercent = document.getElementById('zfs-arc-min-percent');
-    const zfsArcMaxPercent = document.getElementById('zfs-arc-max-percent');
     const powerAwareSchedulerMode = document.getElementById('power-aware-cpu-scheduler-mode');
     const thpEnabledMode = document.getElementById('thp-enabled-mode');
     const thpDefragMode = document.getElementById('thp-defrag-mode');
@@ -320,8 +308,6 @@ input[type="number"] { width: 100%; }
             vfs_cache_max_age: vfsCacheMaxAge.value,
             enable_disk_metadata_cache_warmup: enableDiskMetadataCacheWarmup.checked ? '1' : '0',
             enable_user_share_metadata_cache_warmup: enableUserShareMetadataCacheWarmup.checked ? '1' : '0',
-            zfs_arc_min_percent: zfsArcMinPercent.value,
-            zfs_arc_max_percent: zfsArcMaxPercent.value,
             power_aware_cpu_scheduler_mode: powerAwareSchedulerMode.value,
             thp_enabled_mode: thpEnabledMode.value,
             thp_defrag_mode: thpDefragMode.value,
@@ -361,8 +347,6 @@ input[type="number"] { width: 100%; }
             vfsCacheMaxAge,
             enableDiskMetadataCacheWarmup,
             enableUserShareMetadataCacheWarmup,
-            zfsArcMinPercent,
-            zfsArcMaxPercent,
             powerAwareSchedulerMode,
             thpEnabledMode,
             thpDefragMode,
@@ -388,8 +372,6 @@ input[type="number"] { width: 100%; }
         vfsCacheMaxAge.value = String(settings.vfs_cache_max_age ?? 60000);
         enableDiskMetadataCacheWarmup.checked = Number(settings.enable_disk_metadata_cache_warmup ?? 1) === 1;
         enableUserShareMetadataCacheWarmup.checked = Number(settings.enable_user_share_metadata_cache_warmup ?? 0) === 1;
-        zfsArcMinPercent.value = String(settings.zfs_arc_min_percent ?? 10);
-        zfsArcMaxPercent.value = String(settings.zfs_arc_max_percent ?? 40);
         thpEnabledMode.value = settings.thp_enabled_mode || 'madvise';
         thpDefragMode.value = settings.thp_defrag_mode || 'defer+madvise';
 

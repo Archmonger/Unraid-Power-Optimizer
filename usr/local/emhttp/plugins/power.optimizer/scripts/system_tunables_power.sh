@@ -123,21 +123,11 @@ vfs_cache_pressure=$(int_in_range "$(read_config_value "VFS_CACHE_PRESSURE" "1")
 vfs_cache_max_age=$(int_in_range "$(read_config_value "VFS_CACHE_MAX_AGE" "60000")" 60000 1 31536000)
 enable_disk_metadata_cache_warmup=$(bool_from_string "$(read_config_value "ENABLE_DISK_METADATA_CACHE_WARMUP" "1")")
 enable_user_share_metadata_cache_warmup=$(bool_from_string "$(read_config_value "ENABLE_USER_SHARE_METADATA_CACHE_WARMUP" "0")")
-zfs_arc_min_percent=$(int_in_range "$(read_config_value "ZFS_ARC_MIN_PERCENT" "10")" 10 0 100)
-zfs_arc_max_percent=$(int_in_range "$(read_config_value "ZFS_ARC_MAX_PERCENT" "40")" 40 0 100)
 thp_enabled_mode=$(thp_enabled_mode_from_string "$(read_config_value "THP_ENABLED_MODE" "madvise")")
 thp_defrag_mode=$(thp_defrag_mode_from_string "$(read_config_value "THP_DEFRAG_MODE" "defer+madvise")")
 numa_balancing_target=$(int_in_range "$(read_config_value "NUMA_BALANCING_TARGET" "0")" 0 0 1)
 
-if [[ "$zfs_arc_min_percent" -gt 0 && "$zfs_arc_max_percent" -gt 0 && "$zfs_arc_min_percent" -gt "$zfs_arc_max_percent" ]]; then
-    echo "ZFS ARC min percent (${zfs_arc_min_percent}%) was above max (${zfs_arc_max_percent}%); clamping min to max."
-    zfs_arc_min_percent="$zfs_arc_max_percent"
-fi
-
 system_memory_bytes=$(read_memtotal_bytes)
-zfs_arc_min_bytes=$(percent_of_total_bytes "$zfs_arc_min_percent" "$system_memory_bytes")
-zfs_arc_max_bytes=$(percent_of_total_bytes "$zfs_arc_max_percent" "$system_memory_bytes")
-
 system_auto_startup=$(bool_from_string "$(read_config_value "SYSTEM_AUTO_EXECUTE_ON_STARTUP" "0")")
 disable_nmi_watchdog=0
 if [[ "$nmi_watchdog_target" -eq 0 ]]; then
@@ -157,8 +147,6 @@ echo "System setting VFS_CACHE_PRESSURE=${vfs_cache_pressure}."
 echo "System setting VFS_CACHE_MAX_AGE=${vfs_cache_max_age}."
 echo "System setting ENABLE_DISK_METADATA_CACHE_WARMUP=${enable_disk_metadata_cache_warmup}."
 echo "System setting ENABLE_USER_SHARE_METADATA_CACHE_WARMUP=${enable_user_share_metadata_cache_warmup}."
-echo "System setting ZFS_ARC_MIN_PERCENT=${zfs_arc_min_percent}."
-echo "System setting ZFS_ARC_MAX_PERCENT=${zfs_arc_max_percent}."
 echo "System setting THP_ENABLED_MODE=${thp_enabled_mode}."
 echo "System setting THP_DEFRAG_MODE=${thp_defrag_mode}."
 echo "System setting NUMA_BALANCING_TARGET=${numa_balancing_target}."
@@ -327,32 +315,6 @@ if [[ "$enable_user_share_metadata_cache_warmup" -eq 1 ]]; then
     warm_user_share_metadata_cache
 else
     echo "User share filesystem cache disabled; no /mnt/user caching performed."
-fi
-
-if [[ "$zfs_arc_max_percent" -eq 0 ]]; then
-    echo "ZFS ARC max percent is 0; keeping existing zfs_arc_max value."
-elif [[ "$system_memory_bytes" -gt 0 ]]; then
-    write_value_with_status \
-        /sys/module/zfs/parameters/zfs_arc_max \
-        "$zfs_arc_max_bytes" \
-        "zfs_arc_max set to ${zfs_arc_max_bytes} bytes (${zfs_arc_max_percent}% of RAM)." \
-        "Failed to set zfs_arc_max to ${zfs_arc_max_bytes} bytes (${zfs_arc_max_percent}% of RAM)." \
-        "zfs_arc_max path is not writable on this system."
-else
-    echo "Unable to read total system memory from /proc/meminfo; skipping zfs_arc_max tuning."
-fi
-
-if [[ "$zfs_arc_min_percent" -eq 0 ]]; then
-    echo "ZFS ARC min percent is 0; keeping existing zfs_arc_min value."
-elif [[ "$system_memory_bytes" -gt 0 ]]; then
-    write_value_with_status \
-        /sys/module/zfs/parameters/zfs_arc_min \
-        "$zfs_arc_min_bytes" \
-        "zfs_arc_min set to ${zfs_arc_min_bytes} bytes (${zfs_arc_min_percent}% of RAM)." \
-        "Failed to set zfs_arc_min to ${zfs_arc_min_bytes} bytes (${zfs_arc_min_percent}% of RAM)." \
-        "zfs_arc_min path is not writable on this system."
-else
-    echo "Unable to read total system memory from /proc/meminfo; skipping zfs_arc_min tuning."
 fi
 
 write_option_with_status \
